@@ -73,7 +73,7 @@
       return status;
     };
 
-    const handleCreatePayPalOrder = async () => {
+    const handleCreatePayPalOrder = async (): Promise<string> => {
       // Provide a default response if undefined
       const res: OrderActionResponse = await createPayPalOrder(order.id) ?? {
         success: false,
@@ -83,9 +83,13 @@
     
       if (!res.success) {
         toast.error(res.message);
+        // Return some fallback string, or you can throw instead:
+        throw new Error('Could not create PayPal order');
       }
     
-      return res.data;
+      // The PayPalButtons component wants a string (the order ID).
+      // If you’re certain data is a string, cast it:
+      return res.data as string;
     };
 
     const handleApprovePayPalOrder = async (data: { orderID: string }) => {
