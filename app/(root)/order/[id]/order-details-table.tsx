@@ -32,7 +32,7 @@
   interface OrderActionResponse {
     success: boolean;
     message: string;
-    data?: any;
+    data?: unknown;
   }
 
   const OrderDetailsTable = ({ 

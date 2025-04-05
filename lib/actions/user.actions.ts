@@ -31,9 +31,9 @@ export async function signInWithCredentials(
         await signIn('credentials', user);
 
         return { success: true, message: 'Signed in succesfully!' }
-      } catch (error) {
-        return { success: false, message: 'Invalid email or password' }
-    }
+      } catch {
+        return { success: false, message: 'Invalid email or password' };
+      }
 }
 
 // Sign user out

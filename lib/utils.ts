@@ -19,21 +19,46 @@ export function formatNumberWithDecimal(num: number): string {
 
 // Format error 
 // esling-disable-next-line @typescript-eslint/no-explicit-any
-export function formatError(error: any) { 
-  if (error.name === 'ZodError') {
-    // Handle Zod error
-    const fieldErrors = Object.keys(error.errors).map((field) => error.errors[field].message);
+export function formatError(error: unknown): string {
+  // First, ensure error is an object.
+  if (typeof error === "object" && error !== null) {
+    // Cast to a dictionary shape so we can read .name, .code, etc. carefully.
+    const e = error as Record<string, unknown>;
 
-    return fieldErrors.join('. ')
-  } else if (error.name === 'PrismaClientKnownRequestError' && error.code === 'P2002') { 
-    // Handle Prisma error
-    const field = error.meta?.target ? error.meta.target[0] : 'Field';
-    return `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`
-  } else {
-    // Handle other error
-    return typeof error.message === 'string' ? error.message : JSON.stringify(error.message);
+    // Handle Zod error
+    if (e.name === "ZodError" && typeof e.errors === "object" && e.errors !== null) {
+      const errorsObj = e.errors as Record<string, { message: string }>;
+      const fieldErrors = Object.keys(errorsObj).map((field) => errorsObj[field].message);
+      return fieldErrors.join(". ");
+    }
+
+    // Handle Prisma unique constraint error
+    if (
+      e.name === "PrismaClientKnownRequestError" &&
+      e.code === "P2002" &&
+      typeof e.meta === "object" &&
+      e.meta !== null
+    ) {
+      // meta?.target is usually an array of fields that caused the uniqueness error
+      const meta = e.meta as { target?: string[] };
+      const field = meta.target?.[0] ?? "Field";
+      return `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`;
+    }
+
+    // Handle a generic error with a message
+    if (typeof e.message === "string") {
+      return e.message;
+    }
+
+    // If .message is present but not a string, attempt JSON-stringifying
+    if ("message" in e) {
+      return JSON.stringify(e.message);
+    }
   }
- }
+
+  // fallback if it's not an object or has no message
+  return String(error);
+}
 
  // Round number to 2 decimal places
  export function round2(value: number | string) {
