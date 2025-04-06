@@ -6,14 +6,14 @@ import { useState } from 'react';
 
 const ReviewList = ({
   userId,
-  productId,
+  // productId,
   productSlug,
 }: {
   userId: string;
   productId: string;
   productSlug: string;
 }) => {
-  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviews, /*, setReviews */] = useState<Review[]>([]);
 
   return (
     <div className='space-y-4'>
