@@ -33,7 +33,7 @@ import {
     DialogTitle,
   } from '@/components/ui/dialog';
   import { Button } from '@/components/ui/button';
-  import { createUpdateReview } from '@/lib/actions/review.actions';
+  import { createUpdateReview, getReviewByProductId } from '@/lib/actions/review.actions';
   import { toast } from 'sonner';
 
   const ReviewForm = ({
@@ -53,10 +53,17 @@ import {
       });
       
        // Open Form Handler
-      //const handleOpenForm = async () => {
-       const handleOpenForm = () => {
+       const handleOpenForm = async () => {
         form.setValue('productId', productId);
         form.setValue('userId', userId);
+
+        const review = await getReviewByProductId({ productId });
+
+        if (review) {
+          form.setValue('title', review.title);
+          form.setValue('description', review.description);
+          form.setValue('rating', review.rating);
+        }
 
         setOpen(true);
       }
