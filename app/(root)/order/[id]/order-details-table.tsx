@@ -27,6 +27,7 @@
     updateOrderToPaidCOD,
     deliverOrder,
   } from '@/lib/actions/order.actions';
+  import StripePayment from './stripe-payment';
 
   // Define an interface for the response to add type safety
   interface OrderActionResponse {
@@ -39,10 +40,12 @@
     order, 
     paypalClientId,
     isAdmin,
+    stripeClientSecret,
   }: { 
     order: Order, 
     paypalClientId: string;
     isAdmin: boolean;
+    stripeClientSecret: string | null;
   }) => {
     const {
       id,
@@ -263,6 +266,16 @@
                       </PayPalScriptProvider>
                     </div>
                   )}
+
+                  {/* Stripe Payment */}
+                  {!isPaid && paymentMethod === 'Stripe' && stripeClientSecret && (
+                    <StripePayment
+                      priceInCents={Number(order.totalPrice) * 100}
+                      orderId={order.id}
+                      clientSecret={stripeClientSecret}
+                    />
+                  )}
+
                   {/* Cash On Delivery */}
                   {isAdmin && !isPaid && paymentMethod === 'CashOnDelivery' && (
                     <MarkAsPaidButton />
