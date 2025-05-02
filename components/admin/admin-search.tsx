@@ -23,7 +23,7 @@ const AdminSearch = () => {
     <form action={formActionUrl} method='GET'>
       <Input
         type='search'
-        placeholder='Search...'
+        placeholder='Søg...'
         name='query'
         value={queryValue}
         onChange={(e) => setQueryValue(e.target.value)}

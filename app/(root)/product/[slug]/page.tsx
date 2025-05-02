@@ -44,11 +44,11 @@ const ProductDetailsPage = async (props: {
                     <p>{product.numReviews} reviews</p>
                     <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                         <ProductPrice value={Number(product.price)} 
-                        className='w-24 rounded-full bg-green-100 text-green-700 px-5 py-2' />
+                        className='rounded-full bg-green-100 text-green-700 px-5 py-2' />
                     </div>
                 </div>
                 <div className="mt-10">
-                    <p className="font-semibold">Description</p>
+                    <p className="font-semibold">Beskrivelse</p>
                     <p>{product.description}</p>
                 </div>
               </div>  
@@ -57,7 +57,7 @@ const ProductDetailsPage = async (props: {
                 <Card>
                     <CardContent className="p-4">
                         <div className="mb-2 flex justify-between">
-                            <div>Price</div>
+                            <div>Pris</div>
                             <div>
                                 <ProductPrice value={Number(product.price)} />
                             </div>
@@ -65,9 +65,9 @@ const ProductDetailsPage = async (props: {
                         <div className="mb-2 flex justify-between">
                             <div>Status</div>
                             {product.stock > 0 ? (
-                                <Badge variant='outline'>In Stock</Badge>
+                                <Badge variant='outline'>På Lager</Badge>
                             ) : (
-                                <Badge variant='destructive'>Out Of Stock</Badge>
+                                <Badge variant='destructive'>IKKE på Lager</Badge>
                             )}
                         </div>
                         {product.stock > 0 && (
@@ -90,7 +90,7 @@ const ProductDetailsPage = async (props: {
             </div>
         </section>
         <section className='mt-10'>
-        <h2 className='h2-bold mb-5'>Customer Reviews</h2>
+        <h2 className='h2-bold mb-5'>Brugeranmeldelser</h2>
         <ReviewList
           userId={userId || ''}
           productId={product.id}

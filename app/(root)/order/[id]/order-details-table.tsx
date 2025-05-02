@@ -225,9 +225,7 @@
                         <TableCell>
                           <span className='px-2'>{item.qty}</span>
                         </TableCell>
-                        <TableCell className='text-right'>
-                          ${item.price}
-                        </TableCell>
+                        <TableCell className='text-right'>{formatCurrency(item.price)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

@@ -6,11 +6,11 @@
  
  const links = [
    {
-     title: 'Profile',
+     title: 'Min Profil',
      href: '/user/profile',
    },
    {
-     title: 'Orders',
+     title: 'Ordrer',
      href: '/user/orders',
    },
  ];

@@ -18,7 +18,7 @@ const UserButton = async () => {
         return(
             <Button asChild>
                 <Link href='/sign-in'>
-                    <UserIcon /> Sign In
+                    <UserIcon /> Log In
                 </Link>
             </Button>
         );
@@ -49,20 +49,20 @@ const UserButton = async () => {
 
                 <DropdownMenuItem>
                     <Link href='/user/profile' className='w-full'>
-                        User Profile
+                        Min profil
                     </Link>
                 </DropdownMenuItem>
 
                 <DropdownMenuItem>
                     <Link href='/user/orders' className='w-full'>
-                        Order History
+                        Ordrer
                     </Link>
                 </DropdownMenuItem>
 
                 {session?.user?.role === 'admin' && (
                     <DropdownMenuItem>
                     <Link href='/admin/overview' className='w-full'>
-                        Admin
+                        Admin-panel
                     </Link>
                     </DropdownMenuItem>
                 )}
@@ -70,7 +70,7 @@ const UserButton = async () => {
                 <DropdownMenuItem className='p-0 mb-1'>
                     <form action={signOutUser} className='w-full'>
                         <Button className='w-full py-4 px-2 h-4 justify-start' variant='ghost'>
-                            Sign Out
+                            Log ud
                         </Button>
                     </form>
                 </DropdownMenuItem>

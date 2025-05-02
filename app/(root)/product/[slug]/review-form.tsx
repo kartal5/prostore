@@ -90,15 +90,15 @@ import {
       return (
         <Dialog open={open} onOpenChange={setOpen}>
           <Button onClick={handleOpenForm} variant='default'>
-            Write a Review
+            Skriv anmeldelse
           </Button>
           <DialogContent className='sm:max-w-[425px]'>
             <Form {...form}>
             <form method='post' onSubmit={form.handleSubmit(onSubmit)}>
                <DialogHeader>
-                <DialogTitle>Write a Review</DialogTitle>
+                <DialogTitle>Skriv anmeldelse</DialogTitle>
                 <DialogDescription>
-                    Share your thoughts with other customers
+                    Del dine tanker med andre brugere
                 </DialogDescription>
                </DialogHeader>
                <div className="grid gap-4 py-4">
@@ -107,9 +107,9 @@ import {
                     name='title'
                     render={({ field }) => (
                     <FormItem>
-                        <FormLabel>Title</FormLabel>
+                        <FormLabel>Titel</FormLabel>
                         <FormControl>
-                        <Input placeholder='Enter title' {...field} />
+                        <Input placeholder='Skriv titel' {...field} />
                         </FormControl>
                     </FormItem>
                     )}
@@ -119,9 +119,9 @@ import {
                     name='description'
                     render={({ field }) => (
                     <FormItem>
-                        <FormLabel>Description</FormLabel>
+                        <FormLabel>Beskrivelse</FormLabel>
                         <FormControl>
-                        <Textarea placeholder='Enter description' {...field} />
+                        <Textarea placeholder='Skriv beskrivelse' {...field} />
                         </FormControl>
                     </FormItem>
                     )}
@@ -131,7 +131,7 @@ import {
                     name='rating'
                     render={({ field }) => (
                     <FormItem>
-                        <FormLabel>Rating</FormLabel>
+                        <FormLabel>Stjerne</FormLabel>
                         <Select
                             onValueChange={field.onChange}
                             value={field.value.toString()}
@@ -165,7 +165,7 @@ import {
                         className='w-full'
                         disabled={form.formState.isSubmitting}
                     >
-                        {form.formState.isSubmitting ? 'Submitting...' : 'Submit'}
+                        {form.formState.isSubmitting ? 'Tilføjer...' : 'Tilføj'}
                     </Button>
                 </DialogFooter>
               </form>

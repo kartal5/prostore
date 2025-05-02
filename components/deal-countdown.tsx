@@ -83,23 +83,23 @@ const DealCountdown = () => {
   return ( 
   <section className="grid grid-cols-1 md:grid-cols-2 my-20">
     <div className="flex flex-col gap-2 justify-center">
-      <h3 className="text-3xl font-bold">Deal Of The Month</h3>
+      <h3 className="text-3xl font-bold">Månedens Tilbud</h3>
       <p>
-        Get ready for a shopping experience like never before with our Deals
-        of the Month! Every purchase comes with exclusive perks and offers,
-        making this month a celebration of savvy choices and amazing deals.
-        Don&apos;t miss out! 🎁🛒
+      Gør dig klar til en shoppingoplevelse som aldrig før med vores Månedens Tilbud! 
+      Hvert køb giver dig eksklusive fordele og tilbud, 
+      og denne måned bliver en fejring af smarte valg og fantastiske priser. 
+      Gå ikke glip af det! 🎁🛒
       </p>
       <ul className='grid grid-cols-4'>
-        <StatBox label='Days' value={time.days} />
-        <StatBox label='Hours' value={time.hours} />
-        <StatBox label='Minutes' value={time.minutes} />
-        <StatBox label='Seconds' value={time.seconds} />
+        <StatBox label='Dage' value={time.days} />
+        <StatBox label='Timer' value={time.hours} />
+        <StatBox label='Minutter' value={time.minutes} />
+        <StatBox label='Sekunder' value={time.seconds} />
       </ul>
       <div className="text-center">
         <Button asChild>
           <Link href='/search'>
-            View Products
+          Se Produkter
           </Link>
         </Button>
       </div>

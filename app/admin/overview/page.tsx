@@ -17,14 +17,14 @@ import Charts from './charts';
 
 
 export const metadata: Metadata = {
-  title: 'Admin Dashboard',
+  title: 'Admin Oversigt',
 };
 
 const AdminOverviewPage = async () => {
   const session = await auth();
 
   if (session?.user?.role !== 'admin') {
-    throw new Error('User is not authorized');
+    throw new Error('Bruger er ikke autoriseret');
   }
 
   const summary = await getOrderSummary();
@@ -34,11 +34,11 @@ const AdminOverviewPage = async () => {
 
     return (
       <div className='space-y-2'>
-        <h1 className='h2-bold'>Dashboard</h1>
+        <h1 className='h2-bold'>Oversigt</h1>
         <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-4'>
           <Card>
             <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-              <CardTitle className='text-sm font-medium'>Total Revenue</CardTitle>
+              <CardTitle className='text-sm font-medium'>Total omsætning</CardTitle>
               <BadgeDollarSign />
             </CardHeader>
             <CardContent>
@@ -49,7 +49,7 @@ const AdminOverviewPage = async () => {
           </Card>
         <Card>
           <CardHeader className='flex flex-row items-center justify-between pb-2 space-y-0'>
-            <CardTitle className='text-sm font-medium'>Sales</CardTitle>
+            <CardTitle className='text-sm font-medium'>Salg</CardTitle>
             <CreditCard />
           </CardHeader>
           <CardContent>
@@ -60,7 +60,7 @@ const AdminOverviewPage = async () => {
         </Card>
         <Card>
           <CardHeader className='flex flex-row items-center justify-between pb-2 space-y-0'>
-            <CardTitle className='text-sm font-medium'>Customers</CardTitle>
+            <CardTitle className='text-sm font-medium'>Kunder</CardTitle>
             <Users />
           </CardHeader>
           <CardContent>
@@ -71,7 +71,7 @@ const AdminOverviewPage = async () => {
         </Card>
         <Card>
           <CardHeader className='flex flex-row items-center justify-between pb-2 space-y-0'>
-            <CardTitle className='text-sm font-medium'>Products</CardTitle>
+            <CardTitle className='text-sm font-medium'>Produkter</CardTitle>
             <Barcode />
           </CardHeader>
           <CardContent>
@@ -84,7 +84,7 @@ const AdminOverviewPage = async () => {
       <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-7'>
         <Card className='col-span-4'>
           <CardHeader>
-            <CardTitle>Overview</CardTitle>
+            <CardTitle>Oversigt (månedligt)</CardTitle>
           </CardHeader>
           <CardContent>
             <Charts
@@ -96,23 +96,23 @@ const AdminOverviewPage = async () => {
         </Card>
         <Card className='col-span-3'>
           <CardHeader>
-            <CardTitle>Recent Sales</CardTitle>
+            <CardTitle>Seneste salg</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>BUYER</TableHead>
-                  <TableHead>DATE</TableHead>
+                <TableHead>KØBER</TableHead>
+                  <TableHead>DATO</TableHead>
                   <TableHead>TOTAL</TableHead>
-                  <TableHead>ACTIONS</TableHead>
+                  <TableHead>HANDLINGER</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {summary.latestSales.map((order) => (
                   <TableRow key={order.id}>
                     <TableCell>
-                      {order?.user?.name ? order.user.name : 'Deleted User'}
+                      {order?.user?.name ? order.user.name : 'Slettet bruger'}
                     </TableCell>
                     <TableCell>
                       {formatDateTime(order.createdAt).dateOnly}
@@ -120,7 +120,7 @@ const AdminOverviewPage = async () => {
                     <TableCell>{formatCurrency(order.totalPrice)}</TableCell>
                     <TableCell>
                       <Link href={`/order/${order.id}`}>
-                        <span className='px-2'>Details</span>
+                        <span className='px-2'>Detaljer</span>
                       </Link>
                     </TableCell>
                   </TableRow>

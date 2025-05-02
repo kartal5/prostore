@@ -14,6 +14,7 @@ The content is organized as follows:
 1. This summary section
 2. Repository information
 3. Directory structure
+4. Repository files (if enabled)
 4. Repository files, each consisting of:
   - File path as an attribute
   - Full contents of the file
@@ -54,12 +55,16 @@ app/(root)/cart/page.tsx
 app/(root)/layout.tsx
 app/(root)/order/[id]/order-details-table.tsx
 app/(root)/order/[id]/page.tsx
+app/(root)/order/[id]/stripe-payment-success/page.tsx
+app/(root)/order/[id]/stripe-payment.tsx
 app/(root)/page.tsx
 app/(root)/payment-method/page.tsx
 app/(root)/payment-method/payment-method-form.tsx
 app/(root)/place-order/page.tsx
 app/(root)/place-order/place-order-form.tsx
 app/(root)/product/[slug]/page.tsx
+app/(root)/product/[slug]/review-form.tsx
+app/(root)/product/[slug]/review-list.tsx
 app/(root)/search/page.tsx
 app/(root)/shipping-address/page.tsx
 app/(root)/shipping-address/shipping-address-form.tsx
@@ -77,6 +82,7 @@ app/admin/users/page.tsx
 app/api/auth/[...nextauth]/route.ts
 app/api/uploadthing/core.ts
 app/api/uploadthing/route.ts
+app/api/webhooks/stripe/route.ts
 app/layout.tsx
 app/loading.tsx
 app/not-found.tsx
@@ -90,7 +96,9 @@ auth.ts
 components.json
 components/admin/admin-search.tsx
 components/admin/product-form.tsx
+components/deal-countdown.tsx
 components/footer.tsx
+components/icon-boxes.tsx
 components/shared/checkout-steps.tsx
 components/shared/delete-dialog.tsx
 components/shared/header/category-drawer.tsx
@@ -106,6 +114,7 @@ components/shared/product/product-carousel.tsx
 components/shared/product/product-images.tsx
 components/shared/product/product-list.tsx
 components/shared/product/product-price.tsx
+components/shared/product/rating.tsx
 components/ui/alert-dialog.tsx
 components/ui/badge.tsx
 components/ui/button.tsx
@@ -128,12 +137,15 @@ components/view-all-products-button.tsx
 db/prisma.ts
 db/sample-data.ts
 db/seed.ts
+email/index.tsx
+email/purchase-receipt.tsx
 eslint.config.mjs
 jest.config.ts
 jest.setup.ts
 lib/actions/cart.actions.ts
 lib/actions/order.actions.ts
 lib/actions/product.actions.ts
+lib/actions/review.actions.ts
 lib/actions/user.actions.ts
 lib/constants/index.ts
 lib/paypal.ts
@@ -149,6 +161,7 @@ prisma/migrations/20250307132342_add_user_based_tables/migration.sql
 prisma/migrations/20250311143354_add_cart/migration.sql
 prisma/migrations/20250325131605_add_order/migration.sql
 prisma/migrations/20250403085109_add_isfeatured_default/migration.sql
+prisma/migrations/20250406094306_add_review/migration.sql
 prisma/migrations/migration_lock.toml
 prisma/schema.prisma
 public/images/logo.svg
@@ -698,324 +711,171 @@ export default function RootLayout({
   }
 </file>
 
-<file path="app/(root)/order/[id]/order-details-table.tsx">
-'use client';
-  import { Badge } from '@/components/ui/badge';
-  import { Card, CardContent } from '@/components/ui/card';
-  import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-  } from '@/components/ui/table';
-  import { Button } from '@/components/ui/button';
-  import { formatCurrency, formatDateTime, formatId } from '@/lib/utils';
-  import { Order } from '@/types';
-  import Link from 'next/link';
-  import Image from 'next/image';
-  import { toast } from 'sonner';
-  import { useTransition } from 'react';
-  import {
-    PayPalButtons,
-    PayPalScriptProvider,
-    usePayPalScriptReducer,
-  } from '@paypal/react-paypal-js';
-  import {
-    createPayPalOrder,
-    approvePayPalOrder,
-    updateOrderToPaidCOD,
-    deliverOrder,
-  } from '@/lib/actions/order.actions';
+<file path="app/(root)/order/[id]/stripe-payment-success/page.tsx">
+import { Button } from '@/components/ui/button';
+import { getOrderById } from '@/lib/actions/order.actions';
+import Link from 'next/link';
+import { notFound, redirect } from 'next/navigation';
+import Stripe from 'stripe';
 
-  // Define an interface for the response to add type safety
-  interface OrderActionResponse {
-    success: boolean;
-    message: string;
-    data?: any;
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+
+const SuccessPage = async (props: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ payment_intent: string }>;
+}) => {
+  const { id } = await props.params;
+  const { payment_intent: paymentIntentId } = await props.searchParams;
+
+  // Fetch order
+  const order = await getOrderById(id);
+  if (!order) notFound();
+
+  // Retrieve payment intent
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+  // Check if payment intent is valid
+  if (
+    paymentIntent.metadata.orderId == null ||
+    paymentIntent.metadata.orderId !== order.id.toString()
+  ) {
+    return notFound();
   }
 
-  const OrderDetailsTable = ({ 
-    order, 
-    paypalClientId,
-    isAdmin,
-  }: { 
-    order: Order, 
-    paypalClientId: string;
-    isAdmin: boolean;
-  }) => {
-    const {
-      id,
-      shippingAddress,
-      orderitems,
-      itemsPrice,
-      shippingPrice,
-      taxPrice,
-      totalPrice,
-      paymentMethod,
-      isDelivered,
-      isPaid,
-      paidAt,
-      deliveredAt
-    } = order;
+  // Check if payment is successful
+  const isSuccess = paymentIntent.status === 'succeeded';
 
+  if (!isSuccess) return redirect(`/order/${id}`);
 
-    const PrintLoadingState = () => {
-      const [{ isPending, isRejected }] = usePayPalScriptReducer();
-      let status = '';
-    
-      if (isPending) {
-        status = 'Loading PayPal...';
-      } else if (isRejected) {
-        status = 'Error Loading PayPal';
-      }
-    
-      return status;
-    };
-
-    const handleCreatePayPalOrder = async () => {
-      // Provide a default response if undefined
-      const res: OrderActionResponse = await createPayPalOrder(order.id) ?? {
-        success: false,
-        message: 'Failed to create PayPal order',
-        data: null
-      };
-    
-      if (!res.success) {
-        toast.error(res.message);
-      }
-    
-      return res.data;
-    };
-
-    const handleApprovePayPalOrder = async (data: { orderID: string }) => {
-      // Provide a default response if undefined
-      const res: OrderActionResponse = await approvePayPalOrder(order.id, data) ?? {
-        success: false,
-        message: 'Failed to approve PayPal order',
-        data: null
-      };
-    
-      if (res.success) {
-        toast.success(res.message);
-      } else {
-        toast.error(res.message);
-      }
-    };
-
-      // Button to mark order as paid
-      const MarkAsPaidButton = () => {
-        const [isPending, startTransition] = useTransition();
-    
-        return (
-          <Button
-            type="button"
-            disabled={isPending}
-            onClick={() =>
-              startTransition(async () => {
-                const res = await updateOrderToPaidCOD(order.id);
-                if (res.success) {
-                  toast.success(res.message);
-                } else {
-                  toast.error(res.message);
-                }
-              })
-            }
-          >
-            {isPending ? "processing..." : "Mark As Paid"}
-          </Button>
-        );
-      };
-
-    // Button to mark order as delivered
-    const MarkAsDeliveredButton = () => {
-      const [isPending, startTransition] = useTransition();
-  
-      return (
-        <Button
-          type="button"
-          disabled={isPending}
-          onClick={() =>
-            startTransition(async () => {
-              const res = await deliverOrder(order.id);
-              if (res.success) {
-                toast.success(res.message);
-              } else {
-                toast.error(res.message);
-              }
-            })
-          }
-        >
-          {isPending ? "processing..." : "Mark As Delivered"}
+  return (
+    <div className='max-w-4xl w-full mx-auto space-y-8'>
+      <div className='flex flex-col gap-6 items-center'>
+        <h1 className='h1-bold'>Thanks for your purchase</h1>
+        <div>We are processing your order.</div>
+        <Button asChild>
+          <Link href={`/order/${id}`}>View Order</Link>
         </Button>
-      );
+      </div>
+    </div>
+  );
+};
+
+export default SuccessPage;
+</file>
+
+<file path="app/(root)/order/[id]/stripe-payment.tsx">
+import { FormEvent, useState } from 'react';
+import { loadStripe } from '@stripe/stripe-js';
+import {
+  Elements,
+  LinkAuthenticationElement,
+  PaymentElement,
+  useElements,
+  useStripe,
+} from '@stripe/react-stripe-js';
+import { useTheme } from 'next-themes';
+import { Button } from '@/components/ui/button';
+import { formatCurrency } from '@/lib/utils';
+import { SERVER_URL } from '@/lib/constants';
+
+
+const StripePayment = ({
+  priceInCents,
+  orderId,
+  clientSecret,
+}: {
+  priceInCents: number;
+  orderId: string;
+  clientSecret: string;
+}) => {
+    const stripePromise = loadStripe(
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY as string
+  );
+
+  const { theme, systemTheme } = useTheme();
+
+  // Stripe Form Component
+  const StripeForm = () => {
+    const stripe = useStripe();
+    const elements = useElements();
+
+    const [isLoading, setIsLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
+    const [email, setEmail] = useState('');
+
+    const handleSubmit = async (e: FormEvent) => {
+      e.preventDefault();
+
+      if (stripe == null || elements == null || email == null) return;
+
+      setIsLoading(true);
+
+      stripe
+        .confirmPayment({
+          elements,
+          confirmParams: {
+            return_url: `${SERVER_URL}/order/${orderId}/stripe-payment-success`,
+          },
+        })
+        .then(({ error }) => {
+          if (
+            error?.type === 'card_error' ||
+            error?.type === 'validation_error'
+          ) {
+            setErrorMessage(error?.message ?? 'An unknown error occurred');
+          } else if (error) {
+            setErrorMessage('An unknown error occurred');
+          }
+        })
+        .finally(() => setIsLoading(false));
     };
-    
-    
+
     return (
-      <>
-        <h1 className='py-4 text-2xl'>Order {formatId(id)}</h1>
-        <div className="grid md:grid-cols-3 md:gap-5">
-          <div className="col-span-2 space-4-y overlow-x-auto">
-          <Card>
-              <CardContent className='p-4 gap-4'>
-                <h2 className='text-xl pb-4'>Payment Method</h2>
-                <p className='mb-2'>{paymentMethod}</p>
-                {isPaid ? (
-                  <Badge variant='secondary'>
-                    Paid at {formatDateTime(paidAt!).dateTime}
-                  </Badge>
-                ) : (
-                  <Badge variant='destructive'>Not paid</Badge>
-                )}
-              </CardContent>
-            </Card>
-            <Card className='my-2'>
-              <CardContent className='p-4 gap-4'>
-                <h2 className='text-xl pb-4'>Shipping Address</h2>
-                <p>{shippingAddress.fullName}</p>
-                <p className='mb-2'>
-                  {shippingAddress.streetAddress}, {shippingAddress.city}
-                  {shippingAddress.postalCode}, {shippingAddress.country}
-                </p>
-                {isDelivered ? (
-                  <Badge variant='secondary'>
-                    Delivered at {formatDateTime(deliveredAt!).dateTime}
-                  </Badge>
-                ) : (
-                  <Badge variant='destructive'>Not Delivered</Badge>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className='p-4 gap-4'>
-                <h2 className='text-xl pb-4'>Order Items</h2>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Price</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orderitems.map((item) => (
-                      <TableRow key={item.slug}>
-                        <TableCell>
-                          <Link
-                            href={`/product/{item.slug}`}
-                            className='flex items-center'
-                          >
-                            <Image
-                              src={item.image}
-                              alt={item.name}
-                              width={50}
-                              height={50}
-                            />
-                            <span className='px-2'>{item.name}</span>
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <span className='px-2'>{item.qty}</span>
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          ${item.price}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </div>
-          <div>
-            <Card>
-              <CardContent className='p-4 gap-4 space-y-4'>
-                <div className='flex justify-between'>
-                  <div>Items</div>
-                  <div>{formatCurrency(itemsPrice)}</div>
-                </div>
-                <div className='flex justify-between'>
-                  <div>Tax</div>
-                  <div>{formatCurrency(taxPrice)}</div>
-                </div>
-                <div className='flex justify-between'>
-                  <div>Shipping</div>
-                  <div>{formatCurrency(shippingPrice)}</div>
-                </div>
-                <div className='flex justify-between'>
-                  <div>Total</div>
-                  <div>{formatCurrency(totalPrice)}</div>
-                </div>
-                  {/* PayPal Payment */}
-                  {!isPaid && paymentMethod === 'PayPal' && (
-                    <div>
-                      <PayPalScriptProvider options={{ clientId: paypalClientId }}>
-                        <PrintLoadingState />
-                        <PayPalButtons
-                          createOrder={handleCreatePayPalOrder}
-                          onApprove={handleApprovePayPalOrder}
-                        />
-                      </PayPalScriptProvider>
-                    </div>
-                  )}
-                  {/* Cash On Delivery */}
-                  {isAdmin && !isPaid && paymentMethod === 'CashOnDelivery' && (
-                    <MarkAsPaidButton />
-                  )}
-                  {isAdmin && isPaid && !isDelivered && <MarkAsDeliveredButton />}
-              </CardContent>
-            </Card>
-          </div>
+      <form className='space-y-4' onSubmit={handleSubmit}>
+        <div className='text-xl'>Stripe Checkout</div>
+        {errorMessage && <div className='text-destructive'>{errorMessage}</div>}
+        <PaymentElement />
+        <div>
+          <LinkAuthenticationElement
+            onChange={(e) => setEmail(e.value.email)}
+          />
         </div>
-      </>
+        <Button
+          className='w-full'
+          size='lg'
+          disabled={stripe == null || elements == null || isLoading}
+        >
+          {isLoading
+            ? 'Purchasing...'
+            : `Purchase ${formatCurrency(priceInCents / 100)}`}
+        </Button>
+      </form>
     );
   };
 
-
-  export default OrderDetailsTable;
-</file>
-
-<file path="app/(root)/order/[id]/page.tsx">
-import { Metadata } from 'next';
-import { getOrderById } from '@/lib/actions/order.actions';
-import { notFound } from 'next/navigation';
-import OrderDetailsTable from './order-details-table';
-import { ShippingAddress } from '@/types';
-import { auth } from '@/auth';
-
-
-export const metadata: Metadata = {
-  title: 'Order Details',
+  return (
+    <Elements
+      options={{
+        clientSecret,
+        appearance: {
+          theme:
+            theme === 'dark'
+              ? 'night'
+              : theme === 'light'
+              ? 'stripe'
+              : systemTheme === 'light'
+              ? 'stripe'
+              : 'night',
+        },
+      }}
+      stripe={stripePromise}
+    >
+      <StripeForm />
+    </Elements>
+  );
 };
 
-
-const OrderDetailsPage = async (props: {
-    params: Promise<{
-      id: string;
-    }>;
-  }) => {
-    const { id } = await props.params;
-
-    const order = await getOrderById(id);
-    if (!order) notFound();
-
-    const session = await auth();
-
-    return (
-        <OrderDetailsTable
-          order={{
-            ...order,
-            shippingAddress: order.shippingAddress as ShippingAddress,
-          }}
-          paypalClientId={process.env.PAYPAL_CLIENT_ID || 'sb'}
-          isAdmin={session?.user?.role === 'admin' || false}
-        />
-      );      
-  };  
-
-export default OrderDetailsPage;
+export default StripePayment;
 </file>
 
 <file path="app/(root)/payment-method/page.tsx">
@@ -2653,6 +2513,45 @@ export const { GET, POST } = createRouteHandler({
 });
 </file>
 
+<file path="app/api/webhooks/stripe/route.ts">
+import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import { updateOrderToPaid } from '@/lib/actions/order.actions';
+
+export async function POST(req: NextRequest) {
+  // Build the webhook event
+  const event = await Stripe.webhooks.constructEvent(
+    await req.text(),
+    req.headers.get('stripe-signature') as string,
+    process.env.STRIPE_WEBHOOK_SECRET as string
+  );
+
+  // Check for successful payment
+  if (event.type === 'charge.succeeded') {
+    const { object } = event.data;
+
+    // Update order status
+    await updateOrderToPaid({
+      orderId: object.metadata.orderId,
+      paymentResult: {
+        id: object.id,
+        status: 'COMPLETED',
+        email_address: object.billing_details.email!,
+        pricePaid: (object.amount / 100).toFixed(),
+      },
+    });
+
+    return NextResponse.json({
+      message: 'updateOrderToPaid was successful',
+    });
+  }
+
+  return NextResponse.json({
+    message: 'event is not charge.succeeded',
+  });
+}
+</file>
+
 <file path="app/loading.tsx">
 import Image from "next/image";
 import loader from '@/assets/loader.gif'
@@ -3078,371 +2977,128 @@ const AdminSearch = () => {
 export default AdminSearch;
 </file>
 
-<file path="components/admin/product-form.tsx">
+<file path="components/deal-countdown.tsx">
 'use client';
 
-import { toast } from "sonner";
-import { productDefaultValues } from '@/lib/constants';
-import { insertProductSchema, updateProductSchema } from '@/lib/validators';
-import { Product } from '@/types';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter } from 'next/navigation';
-import { ControllerRenderProps, SubmitHandler, useForm } from 'react-hook-form';
-import { z } from 'zod';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '../ui/form';
-import slugify from 'slugify';
-import { Input } from '../ui/input';
-import { Button } from '../ui/button';
-import { Textarea } from '../ui/textarea';
-import { createProduct, updateProduct } from '@/lib/actions/product.actions';
-import { UploadButton } from '@/lib/uploadthing';
-import { Card, CardContent } from '../ui/card';
+import Link from 'next/link';
+import { Button } from './ui/button';
 import Image from 'next/image';
-import { Checkbox } from '../ui/checkbox';
+import { useEffect, useState } from 'react';
 
-const ProductForm = ({
-  type,
-  product,
-  productId,
-}: {
-  type: 'Create' | 'Update';
-  product?: Product;
-  productId?: string;
-}) => {
-  const router = useRouter();
+// Static target date (replace with desired date)
+const TARGET_DATE = new Date('2025-05-20T00:00:00');
 
-  const form = useForm<z.infer<typeof insertProductSchema>>({
-    resolver:
-      type === 'Update'
-        ? zodResolver(updateProductSchema)
-        : zodResolver(insertProductSchema),
-    defaultValues:
-      product && type === 'Update' ? product : productDefaultValues,
-  });
-
-  const onSubmit: SubmitHandler<z.infer<typeof insertProductSchema>> = async (
-    values
-  ) => {
-    // On Create
-    if (type === 'Create') {
-      const res = await createProduct(values);
-
-      if (!res.success) {
-        toast.error(res.message); 
-      } else {
-        toast.success(res.message); 
-        router.push('/admin/products');
-      }
-    }
-
-    // On Update
-    if (type === 'Update') {
-      if (!productId) {
-        router.push('/admin/products');
-        return;
-      }
-
-      const res = await updateProduct({ ...values, id: productId });
-
-      if (!res.success) {
-        toast.error(res.message); // Changed to Sonner's error toast
-      } else {
-        toast.success(res.message); // Changed to Sonner's success toast
-        router.push('/admin/products');
-      }
-    }
+// Function to calculate the time remaining
+const calculateTimeRemaining = (targetDate: Date) => {
+  const currentTime = new Date();
+  const timeDifference = Math.max(Number(targetDate) - Number(currentTime), 0);
+  return {
+    days: Math.floor(timeDifference / (1000 * 60 * 60 * 24)),
+    hours: Math.floor(
+      (timeDifference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
+    ),
+    minutes: Math.floor(
+      (timeDifference % (1000 * 60 * 60)) / (1000 * 60)
+    ),
+    seconds: Math.floor(
+        (timeDifference % (1000 * 60)) / (1000)
+      ),      
   };
+};
 
-  const images = form.watch('images');
-  const isFeatured = form.watch('isFeatured');
-  const banner = form.watch('banner');
 
-  return (
-    <Form {...form}>
-      <form
-        method='POST'
-        onSubmit={form.handleSubmit(onSubmit)}
-        className='space-y-8'
-      >
-        <div className='flex flex-col md:flex-row gap-5'>
-          {/* Name */}
-          <FormField
-            control={form.control}
-            name='name'
-            render={({
-              field,
-            }: {
-              field: ControllerRenderProps<
-                z.infer<typeof insertProductSchema>,
-                'name'
-              >;
-            }) => (
-              <FormItem className='w-full'>
-                <FormLabel>Name</FormLabel>
-                <FormControl>
-                  <Input placeholder='Enter product name' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          {/* Slug */}
-          <FormField
-            control={form.control}
-            name='slug'
-            render={({
-              field,
-            }: {
-              field: ControllerRenderProps<
-                z.infer<typeof insertProductSchema>,
-                'slug'
-              >;
-            }) => (
-              <FormItem className='w-full'>
-                <FormLabel>Name</FormLabel>
-                <FormControl>
-                  <div className='relative'>
-                    <Input placeholder='Enter slug' {...field} />
-                    <Button
-                      type='button'
-                      className='bg-gray-500 hover:bg-gray-600 text-white px-4 py-1 mt-2'
-                      onClick={() => {
-                        form.setValue(
-                          'slug',
-                          slugify(form.getValues('name'), { lower: true })
-                        );
-                      }}
-                    >
-                      Generate
-                    </Button>
-                  </div>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className='flex flex-col md:flex-row gap-5'>
-          {/* Category */}
-          <FormField
-            control={form.control}
-            name='category'
-            render={({
-              field,
-            }: {
-              field: ControllerRenderProps<
-                z.infer<typeof insertProductSchema>,
-                'category'
-              >;
-            }) => (
-              <FormItem className='w-full'>
-                <FormLabel>Category</FormLabel>
-                <FormControl>
-                  <Input placeholder='Enter category' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          {/* Brand */}
-          <FormField
-            control={form.control}
-            name='brand'
-            render={({
-              field,
-            }: {
-              field: ControllerRenderProps<
-                z.infer<typeof insertProductSchema>,
-                'brand'
-              >;
-            }) => (
-              <FormItem className='w-full'>
-                <FormLabel>Brand</FormLabel>
-                <FormControl>
-                  <Input placeholder='Enter brand' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className='flex flex-col md:flex-row gap-5'>
-          {/* Price */}
-          <FormField
-            control={form.control}
-            name='price'
-            render={({
-              field,
-            }: {
-              field: ControllerRenderProps<
-                z.infer<typeof insertProductSchema>,
-                'price'
-              >;
-            }) => (
-              <FormItem className='w-full'>
-                <FormLabel>Price</FormLabel>
-                <FormControl>
-                  <Input placeholder='Enter product price' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          {/* Stock */}
-          <FormField
-            control={form.control}
-            name='stock'
-            render={({
-              field,
-            }: {
-              field: ControllerRenderProps<
-                z.infer<typeof insertProductSchema>,
-                'stock'
-              >;
-            }) => (
-              <FormItem className='w-full'>
-                <FormLabel>Stock</FormLabel>
-                <FormControl>
-                  <Input placeholder='Enter stock' {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className='upload-field flex flex-col md:flex-row gap-5'>
-          {/* Images */}
-          <FormField
-            control={form.control}
-            name='images'
-            render={() => (
-              <FormItem className='w-full'>
-                <FormLabel>Images</FormLabel>
-                <Card>
-                  <CardContent className='space-y-2 mt-2 min-h-48'>
-                    <div className='flex-start space-x-2'>
-                      {images.map((image: string) => (
-                        <Image
-                          key={image}
-                          src={image}
-                          alt='product image'
-                          className='w-20 h-20 object-cover object-center rounded-sm'
-                          width={100}
-                          height={100}
-                        />
-                      ))}
-                      <FormControl>
-                        <UploadButton
-                          endpoint='imageUploader'
-                          onClientUploadComplete={(res: { url: string }[]) => {
-                            form.setValue('images', [...images, res[0].url]);
-                          }}
-                          onUploadError={(error: Error) => {
-                            toast.error(`ERROR! ${error.message}`); 
-                          }}
-                        />
-                      </FormControl>
-                    </div>
-                  </CardContent>
-                </Card>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div className='upload-field'>
-          {/* isFeatured */}
-          Featured Product
-          <Card>
-            <CardContent className='space-y-2 mt-2'>
-              <FormField
-                control={form.control}
-                name='isFeatured'
-                render={({ field }) => (
-                  <FormItem className='space-x-2 items-center'>
-                    <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                    <FormLabel>Is Featured?</FormLabel>
-                  </FormItem>
-                )}
-              />
-              {isFeatured && banner && (
-                <Image
-                  src={banner}
-                  alt='banner image'
-                  className='w-full object-cover object-center rounded-sm'
-                  width={1920}
-                  height={680}
-                />
-              )}
-              {isFeatured && !banner && (
-                <UploadButton
-                  endpoint="imageUploader"
-                  onClientUploadComplete={(res: { url: string }[]) => {
-                    form.setValue("banner", res[0].url);
-                  }}
-                  onUploadError={(error: Error) => {
-                    toast.error(`ERROR! ${error.message}`);
-                  }}
-                />
-              )}
-            </CardContent>
-          </Card>
+const DealCountdown = () => {
+    const [time, setTime] = useState<ReturnType<typeof calculateTimeRemaining>>();
+  
+    useEffect(() => {
+      // Calculate initial time on client
+      setTime(calculateTimeRemaining(TARGET_DATE));
+  
+      const timerInterval = setInterval(() => {
+        const newTime = calculateTimeRemaining(TARGET_DATE);
+        setTime(newTime);
+      
+        if (newTime.days === 0 && newTime.hours === 0 && newTime.minutes === 0 && newTime.seconds === 0) {
+          clearInterval(timerInterval);
+        }
+      
+        return () => clearInterval(timerInterval);
+      }, 1000);
+      }, []);
+      
+      if (!time) {
+        return (
+          <section className='grid grid-cols-1 md:grid-cols-2 my-20'>
+            <div className='flex flex-col gap-2 justify-center'>
+              <h3 className='text-3xl font-bold'>Loading Countdown...</h3>
+            </div>
+          </section>
+        );
+      }     
+      
+  if (time.days === 0 && time.hours === 0 && time.minutes === 0 && time.seconds === 0) {
+    return ( 
+        <section className="grid grid-cols-1 md:grid-cols-2 my-20">
+          <div className="flex flex-col gap-2 justify-center">
+            <h3 className="text-3xl font-bold">Deal has Ended</h3>
+            <p>
+                This deal is now over. Check out our latest promos!
+            </p>
+
+            <div className="text-center">
+              <Button asChild>
+                <Link href='/search'>
+                  View Products
+                </Link>
+              </Button>
+            </div>
           </div>
-        <div>
-          {/* Description */}
-          <FormField
-            control={form.control}
-            name='description'
-            render={({
-              field,
-            }: {
-              field: ControllerRenderProps<
-                z.infer<typeof insertProductSchema>,
-                'description'
-              >;
-            }) => (
-              <FormItem className='w-full'>
-                <FormLabel>Description</FormLabel>
-                <FormControl>
-                  <Textarea
-                    placeholder='Enter product description'
-                    className='resize-none'
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-        <div>
-          <Button
-            type='submit'
-            size='lg'
-            disabled={form.formState.isSubmitting}
-            className='button col-span-2 w-full'
-          >
-            {form.formState.isSubmitting ? 'Submitting' : `${type} Product`}
-          </Button>
-        </div>
-      </form>
-    </Form>
+          <div className="flex justify-center">
+            <Image src='/images/promo.jpg' alt='promotion' width={300} height={200} />
+          </div>
+        </section>
+        );
+  }
+      
+  return ( 
+  <section className="grid grid-cols-1 md:grid-cols-2 my-20">
+    <div className="flex flex-col gap-2 justify-center">
+      <h3 className="text-3xl font-bold">Deal Of The Month</h3>
+      <p>
+        Get ready for a shopping experience like never before with our Deals
+        of the Month! Every purchase comes with exclusive perks and offers,
+        making this month a celebration of savvy choices and amazing deals.
+        Don&apos;t miss out! 🎁🛒
+      </p>
+      <ul className='grid grid-cols-4'>
+        <StatBox label='Days' value={time.days} />
+        <StatBox label='Hours' value={time.hours} />
+        <StatBox label='Minutes' value={time.minutes} />
+        <StatBox label='Seconds' value={time.seconds} />
+      </ul>
+      <div className="text-center">
+        <Button asChild>
+          <Link href='/search'>
+            View Products
+          </Link>
+        </Button>
+      </div>
+    </div>
+    <div className="flex justify-center">
+      <Image src='/images/promo.jpg' alt='promotion' width={300} height={200} />
+    </div>
+  </section>
   );
 };
 
-export default ProductForm;
+const StatBox = ({ label, value }: { label: string; value: number }) => (
+    <li className='p-4 w-full text-center'>
+      <p className='text-3xl font-bold'>{value}</p>
+      <p>{label}</p>
+    </li>
+  );
+  
+export default DealCountdown;
 </file>
 
 <file path="components/footer.tsx">
@@ -3461,6 +3117,52 @@ const Footer = () => {
 
 
 export default Footer;
+</file>
+
+<file path="components/icon-boxes.tsx">
+import { DollarSign, Headset, ShoppingBag, WalletCards } from 'lucide-react';
+import { Card, CardContent } from './ui/card';
+
+const IconBoxes = () => {
+  return (
+    <div>
+      <Card>
+        <CardContent className='grid md:grid-cols-4 gap-4 p-4'>
+          <div className='space-y-2'>
+            <ShoppingBag />
+            <div className='text-sm font-bold'>Free Shipping</div>
+            <div className='text-sm text-muted-foreground'>
+              Free shipping on orders above $100
+            </div>
+          </div>
+          <div className='space-y-2'>
+            <DollarSign />
+            <div className='text-sm font-bold'>Money Back Guarantee</div>
+            <div className='text-sm text-muted-foreground'>
+              Within 30 days of purchase
+            </div>
+          </div>
+          <div className='space-y-2'>
+            <WalletCards />
+            <div className='text-sm font-bold'>Flexible Payment</div>
+            <div className='text-sm text-muted-foreground'>
+              Pay with credit card, PayPal or COD
+            </div>
+          </div>
+          <div className='space-y-2'>
+            <Headset />
+            <div className='text-sm font-bold'>24/7 Support</div>
+            <div className='text-sm text-muted-foreground'>
+              Get support at any time
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default IconBoxes;
 </file>
 
 <file path="components/shared/checkout-steps.tsx">
@@ -3953,107 +3655,6 @@ const AddToCart = ({ cart, item }: { cart?: Cart; item: CartItem }) => {
 export default AddToCart;
 </file>
 
-<file path="components/shared/product/product-card.tsx">
-import Link from "next/link";
-import Image from "next/image";
-import { Card, CardHeader, CardContent } from "@/components/ui/card";
-import ProductPrice from "./product-price";
-import { Product } from '@/types';
-
-const ProductCard = ({ product }: { product: Product }) => {
-    return (<Card className="w-full max-w-sm">
-        <CardHeader className="p-0 items-center">
-            <Link href={`/product/${product.slug}`}>
-            <Image 
-                src={product.images[0]} 
-                alt={product.name} 
-                height={300} 
-                width={300} 
-                priority={true} />
-            </Link>
-        </CardHeader>
-        <CardContent className='p-4 grid gap-4'>
-            <div className="text-xs">{product.brand}</div>
-            <Link href={`/product/${product.slug}`}>
-                <h2 className="text-sm font-medium">{ product.name }</h2>
-            </Link>
-            <div className="flex-between gap-4">
-                <p>{product.rating} Stars</p>
-                { product.stock > 0 ? (
-                    <ProductPrice value={Number(product.price)}/>
-                ) : (
-                    <p className="text-destructive">Out of Stock</p>
-                ) }
-            </div>
-        </CardContent>
-    </Card>);
-}
- 
-export default ProductCard;
-</file>
-
-<file path="components/shared/product/product-carousel.tsx">
-'use client';
-
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from '@/components/ui/carousel';
-import { Product } from '@/types';
-import Autoplay from 'embla-carousel-autoplay';
-import Link from 'next/link';
-import Image from 'next/image';
-
-const ProductCarousel = ({ data }: { data: Product[] }) => {
-  return (
-    <Carousel
-      className='w-full mb-12'
-      opts={{
-        loop: true,
-      }}
-      plugins={[
-        Autoplay({
-          delay: 10000,
-          stopOnInteraction: true,
-          stopOnMouseEnter: true,
-        }),
-      ]}
-    >
-      <CarouselContent>
-        {data.map((product: Product) => (
-          <CarouselItem key={product.id}>
-            <Link href={`/product/${product.slug}`}>
-              <div className='relative mx-auto'>
-                <Image
-                  src={product.banner!}
-                  alt={product.name}
-                  height='0'
-                  width='0'
-                  sizes='100vw'
-                  className='w-full h-auto'
-                />
-                <div className='absolute inset-0 flex items-end justify-center'>
-                  <h2 className='bg-gray-900 bg-opacity-50 text-2xl font-bold px-2 text-white'>
-                    {product.name}
-                  </h2>
-                </div>
-              </div>
-            </Link>
-          </CarouselItem>
-        ))}
-      </CarouselContent>
-      <CarouselPrevious />
-      <CarouselNext />
-    </Carousel>
-  );
-};
-
-export default ProductCarousel;
-</file>
-
 <file path="components/shared/product/product-images.tsx">
 'use client';
 import { useState } from "react";
@@ -4136,6 +3737,53 @@ const ProductPrice = ({ value, className }: { value: number, className?:string; 
 };
  
 export default ProductPrice;
+</file>
+
+<file path="components/shared/product/rating.tsx">
+const Rating = ({ value, caption }: { value: number; caption?: string }) => {
+    const Full = () => (
+      <svg
+        xmlns='http://www.w3.org/2000/svg'
+        className='text-yellow-500 w-5 h-auto fill-current'
+        viewBox='0 0 16 16'
+      >
+        <path d='M3.612 15.443c-.386.198-.824-.149-.746-.592l.83-4.73L.173 6.765c-.329-.314-.158-.888.283-.95l4.898-.696L7.538.792c.197-.39.73-.39.927 0l2.184 4.327 4.898.696c.441.062.612.636.282.95l-3.522 3.356.83 4.73c.078.443-.36.79-.746.592L8 13.187l-4.389 2.256z' />
+      </svg>
+    );
+    const Half = () => (
+      <svg
+        xmlns='http://www.w3.org/2000/svg'
+        className='text-yellow-500 w-5 h-auto fill-current'
+        viewBox='0 0 16 16'
+      >
+        <path d='M5.354 5.119 7.538.792A.516.516 0 0 1 8 .5c.183 0 .366.097.465.292l2.184 4.327 4.898.696A.537.537 0 0 1 16 6.32a.548.548 0 0 1-.17.445l-3.523 3.356.83 4.73c.078.443-.36.79-.746.592L8 13.187l-4.389 2.256a.52.52 0 0 1-.146.05c-.342.06-.668-.254-.6-.642l.83-4.73L.173 6.765a.55.55 0 0 1-.172-.403.58.58 0 0 1 .085-.302.513.513 0 0 1 .37-.245l4.898-.696zM8 12.027a.5.5 0 0 1 .232.056l3.686 1.894-.694-3.957a.565.565 0 0 1 .162-.505l2.907-2.77-4.052-.576a.525.525 0 0 1-.393-.288L8.001 2.223 8 2.226v9.8z' />
+      </svg>
+    );
+    const Empty = () => (
+      <svg
+        xmlns='http://www.w3.org/2000/svg'
+        className='text-yellow-500 w-5 h-auto fill-current'
+        viewBox='0 0 16 16'
+      >
+        <path d='M2.866 14.85c-.078.444.36.791.746.593l4.39-2.256 4.389 2.256c.386.198.824-.149.746-.592l-.83-4.73 3.522-3.356c.33-.314.16-.888-.282-.95l-4.898-.696L8.465.792a.513.513 0 0 0-.927 0L5.354 5.12l-4.898.696c-.441.062-.612.636-.283.95l3.523 3.356-.83 4.73zm4.905-2.767-3.686 1.894.694-3.957a.565.565 0 0 0-.163-.505L1.71 6.745l4.052-.576a.525.525 0 0 0 .393-.288L8 2.223l1.847 3.658a.525.525 0 0 0 .393.288l4.052.575-2.906 2.77a.565.565 0 0 0-.163.506l.694 3.957-3.686-1.894a.503.503 0 0 0-.461 0z' />
+      </svg>
+    );
+  
+    return (
+      <div className='flex gap-2'>
+        <div className='flex gap-1'>
+          {value >= 1 ? <Full /> : value >= 0.5 ? <Half /> : <Empty />}
+          {value >= 2 ? <Full /> : value >= 1.5 ? <Half /> : <Empty />}
+          {value >= 3 ? <Full /> : value >= 2.5 ? <Half /> : <Empty />}
+          {value >= 4 ? <Full /> : value >= 3.5 ? <Half /> : <Empty />}
+          {value >= 5 ? <Full /> : value >= 4.5 ? <Half /> : <Empty />}
+        </div>
+  
+        {caption && <span className='text-sm'>{caption}</span>}
+      </div>
+    );
+  };
+  export default Rating;
 </file>
 
 <file path="components/ui/alert-dialog.tsx">
@@ -5993,6 +5641,25 @@ const ViewAllProductsButton = () => {
 export default ViewAllProductsButton;
 </file>
 
+<file path="email/index.tsx">
+import { Resend } from 'resend';
+import { SENDER_EMAIL, APP_NAME } from '@/lib/constants';
+import { Order } from '@/types';
+import 'dotenv/config';
+import PurchaseReceiptEmail from './purchase-receipt';
+
+const resend = new Resend(process.env.RESEND_API_KEY as string);
+
+export const sendPurchaseReceipt = async ({ order }: { order: Order }) => {
+  await resend.emails.send({
+    from: `${APP_NAME} <${SENDER_EMAIL}>`,
+    to: order.user.email,
+    subject: `Order Confirmation ${order.id}`,
+    react: <PurchaseReceiptEmail order={order} />,
+  });
+};
+</file>
+
 <file path="eslint.config.mjs">
 import { dirname } from "path";
 import { fileURLToPath } from "url";
@@ -6423,459 +6090,6 @@ export async function removeItemFromCart(productId: string) {
 }
 </file>
 
-<file path="lib/actions/order.actions.ts">
-'use server';
-
-import { convertToPlainObject, formatError } from '../utils';
-import { auth } from '@/auth';
-import { getMyCart } from './cart.actions';
-import { getUserById } from './user.actions';
-import { insertOrderSchema } from '../validators';
-import { prisma } from '@/db/prisma';
-import { CartItem, PaymentResult } from '@/types';
-import { paypal } from '../paypal';
-import { revalidatePath } from 'next/cache';
-import { PAGE_SIZE } from '../constants';
-import { Prisma } from '@prisma/client';
-
-
-// Create order and create the order items
-
-/**
- * This function securely handles the process of placing an order in an online store.
- * It checks if the user is logged in, then fetches their cart and user details.
- * It validates that the cart isn't empty and that the user has a shipping address and payment method.
- * Once validated, it creates the order and its items in the database using a single transaction to maintain data consistency.
- * After the order is saved, it clears the user's cart and returns a success message with a link to the order.
- * If anything goes wrong, it returns a clear and helpful error message.
- */
-export async function createOrder() {
-  try {
-    const session = await auth();
-    if (!session) throw new Error('User is not authenticated');
-
-    const cart = await getMyCart();
-    const userId = session?.user?.id;
-    if (!userId) throw new Error('User not found');
-
-    const user = await getUserById(userId);
-
-    if (!cart || cart.items.length === 0) {
-        return { 
-            success: false, 
-            message: 'Your cart is empty', 
-            redirectTo: '/cart',
-        };
-    }
-
-    if (!user.address) {
-        return { 
-            success: false, 
-            message: 'No shipping address', 
-            redirectTo: '/shipping-address',
-        };
-    }
-
-    if (!user.paymentMethod) {
-        return { success: false, 
-            message: 'No payment method', 
-            redirectTo: '/payment-method',
-        };
-    }
-
-    // Create order object
-    const order = insertOrderSchema.parse({
-        userId: user.id,
-        shippingAddress: user.address,
-        paymentMethod: user.paymentMethod,
-        itemsPrice: cart.itemsPrice,
-        shippingPrice: cart.shippingPrice,
-        taxPrice: cart.taxPrice,
-        totalPrice: cart.totalPrice,
-    });
-  
-    // Create a transaction to create order and order items in database
-    const insertedOrderId = await prisma.$transaction(async (tx) => {
-        // Create order
-        const insertedOrder = await tx.order.create({ data: order });
-        // Create order items from the cart items
-        for (const item of cart.items as CartItem[]) {
-        await tx.orderItem.create({
-            data: {
-            ...item,
-            price: item.price,
-            orderId: insertedOrder.id
-            },
-        });
-        }
-
-        // Clear cart
-        await tx.cart.update({
-            where: { id: cart.id },
-            data: {
-            items: [],
-            totalPrice: 0,
-            taxPrice: 0,
-            shippingPrice: 0,
-            itemsPrice: 0
-            },
-        });
-  
-        return insertedOrder.id;
-    });
-  
-    
-    if(!insertedOrderId) throw new Error('Order not created');
-
-    return { 
-        success: true, 
-        message: 'Irder created', 
-        redirectTo: `/order/${insertedOrderId}`,
-    };
-  } catch (error) {
-    // Remove the isRedirectError check
-    return { success: false, message: formatError(error) }
-  }
-}
-
-// Get order by id
-export async function getOrderById(orderId: string) {
-    const data = await prisma.order.findFirst({
-      where: {
-        id: orderId,
-      },
-      include: {
-        orderitems: true,
-        user: { select: { name: true, email: true } },
-      },
-    });
-  
-    return convertToPlainObject(data)
-  }
-  
-// Create new paypal order
-export async function createPayPalOrder(orderId: string) {
-  try {
-    // Get order from database
-    const order = await prisma.order.findFirst({
-      where: {
-        id: orderId
-      }
-    });
-
-    if (order) {
-      // Create paypal order
-      const paypalOrder = await paypal.createOrder(Number(order.totalPrice));
-
-      // Update order with paypal order id
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          paymentResult: {
-            id: paypalOrder.id,
-            email_address: '',
-            status: '',
-            pricePaid: 0
-          }
-        }
-      });
-
-      return {
-        success: true,
-        message: 'Item order created successfully',
-        data: paypalOrder.id,
-      };      
-    } else {
-      throw new Error('Order not found');
-    }    
-  } catch (error) {
-    return { success: false, message: formatError(error) };
-  }
-}
-
-// Approve paypal order and update order to paid
-export async function approvePayPalOrder(
-  orderId: string,
-  data: { orderID: string }
-) {
-  try {
-    // Get order from database
-    const order = await prisma.order.findFirst({
-      where: {
-        id: orderId,
-      },
-    });
-
-    if (!order) throw new Error('Order not found');
-
-    const captureData = await paypal.capturePayment(data.orderID);
-
-    if (
-      !captureData ||
-      captureData.id !== (order.paymentResult as PaymentResult)?.id ||
-      captureData.status !== 'COMPLETED'
-    ) {
-      throw new Error('Error in PayPal payment');
-    }
-
-  // Update order to paid
-  await updateOrderToPaid({
-    orderId,
-    paymentResult: {
-      id: captureData.id,
-      status: captureData.status,
-      email_address: captureData.payer.email_address,
-      pricePaid:
-        captureData.purchase_units[0]?.payments?.captures[0]?.amount?.value,
-    },
-  });
-
-    revalidatePath(`/order/${orderId}`);
-
-  } catch (error) {
-    return { success: false, message: formatError(error) };
-  }
-}
-
-// Update order to paid in database
-export async function updateOrderToPaid({
-  orderId,
-  paymentResult,
-}: {
-  orderId: string;
-  paymentResult?: PaymentResult;
-}) {
-  // Get order from database
-  const order = await prisma.order.findFirst({
-    where: {
-      id: orderId,
-    },
-    include: {
-      orderitems: true,
-    },
-  });
-
-  if (!order) throw new Error('Order not found');
-
-  if (order.isPaid) throw new Error('Order is already paid');
-
-  // Transaction to update the order and the product quantities/stock
-  await prisma.$transaction(async (tx) => {
-    // Update all qty/stock in the db
-    for (const item of order.orderitems) {
-      await tx.product.update({
-        where: {
-          id: item.productId,
-        },
-        data: {
-          stock: {
-            increment: -item.qty,
-          },
-        },
-      });
-    }
-    // Set order to paid
-    await tx.order.update({
-      where: {
-        id: orderId,
-      },
-      data: {
-        isPaid: true,
-        paidAt: new Date(),
-        paymentResult,
-      },
-    });
-  });
-
-  // Get updated order after transaction
-  const updatedOrder = await prisma.order.findFirst({
-    where: { id: orderId },
-    include: {
-      orderitems: true,
-      user: { select: { name: true, email: true } },
-    },
-  });
-
-  if (!updatedOrder) throw new Error('Order not found');
-}
-
-// Get user's orders
-export async function getMyOrders({
-  limit = PAGE_SIZE,
-  page,
-}: {
-  limit?: number;
-  page: number;
-}) {
-  const session = await auth();
-  if (!session) throw new Error('User is not authorized');
-
-  const data = await prisma.order.findMany({
-    where: { userId: session?.user?.id! },
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-    skip: (page - 1) * limit,
-  });
-
-  const dataCount = await prisma.order.count({
-    where: { userId: session?.user?.id! },
-  });
-
-  return {
-    data,
-    totalPages: Math.ceil(dataCount / limit),
-  };
-}
-
-type SalesDataType = {
-  month: string;
-  totalSales: number;
-}[];
-
-
-// Get sales data and order summary
-export async function getOrderSummary() {
-  // Get counts for each resource
-  const ordersCount = await prisma.order.count();
-  const productsCount = await prisma.product.count();
-  const usersCount = await prisma.user.count();
-
-
-  // Calculate the total sales
-  const totalSales = await prisma.order.aggregate({
-    _sum: { totalPrice: true }
-  });
-
-  // Get monthly sales
-  const salesDataRaw = await prisma.$queryRaw<
-    Array<{ month: string; totalSales: Prisma.Decimal }>
-  >`SELECT to_char("createdAt", 'MM/YY') as "month", sum("totalPrice") as "totalSales" FROM "Order" GROUP BY to_char("createdAt", 'MM/YY')`;
-
-  const salesData: SalesDataType = salesDataRaw.map((entry) => ({
-    month: entry.month,
-    totalSales: Number(entry.totalSales),
-  }));
-
-  // Get latest sales
-  const latestSales = await prisma.order.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: {
-      user: { select: { name: true } },
-    },
-    take: 6,
-  });
-
-  return {
-    ordersCount,
-    productsCount,
-    usersCount,
-    totalSales,
-    latestSales,
-    salesData,
-  };
-}
-
-// Get all orders
-export async function getAllOrders({
-  limit = PAGE_SIZE,
-  page,
-  query,
-}: {
-  limit?: number;
-  page: number;
-  query: string;
-}) {
-  const queryFilter: Prisma.OrderWhereInput =
-    query && query !== 'all'
-      ? {
-          user: {
-            name: {
-              contains: query,
-              mode: 'insensitive',
-            } as Prisma.StringFilter,
-          },
-        }
-      : {};
-
-  const data = await prisma.order.findMany({
-    where: {
-      ...queryFilter,
-    },
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-    skip: (page - 1) * limit,
-    include: { user: { select: { name: true } } },
-  });
-
-  const dataCount = await prisma.order.count();
-
-  return {
-    data,
-    totalPages: Math.ceil(dataCount / limit),
-  };
-}
-
-// Delete an order
-export async function deleteOrder(id: string) {
-  try {
-    await prisma.order.delete({ where: { id } });
-
-    revalidatePath('/admin/orders');
-
-    return {
-      success: true,
-      message: 'Order deleted successfully',
-    };
-  } catch (error) {
-    return { success: false, message: formatError(error) };
-  }
-}
-
-// Update COD order to paid
-export async function updateOrderToPaidCOD(orderId: string) {
-  try {
-    await updateOrderToPaid({ orderId });
-
-    revalidatePath(`/order/${orderId}`);
-
-    return { success: true, message: 'Order marked as paid' };
-  } catch (error) {
-    return { success: false, message: formatError(error) };
-  }
-}
-
-// Update COD order to delivered
-export async function deliverOrder(orderId: string) {
-  try {
-    const order = await prisma.order.findFirst({
-      where: {
-        id: orderId,
-      },
-    });
-
-    if (!order) throw new Error('Order not found');
-    if (!order.isPaid) throw new Error('Order is not paid');
-
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        isDelivered: true,
-        deliveredAt: new Date(),
-      },
-    });
-
-    revalidatePath(`/order/${orderId}`);
-
-    return {
-      success: true,
-      message: 'Order has been marked delivered',
-    };
-  } catch (error) {
-    return { success: false, message: formatError(error) };
-  }
-}
-</file>
-
 <file path="lib/paypal.ts">
 const base = process.env.PAYPAL_API_URL || 'https://api-m.sandbox.paypal.com';
 
@@ -7191,36 +6405,32 @@ ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_productId_fkey" FOREIGN KEY ("
 ALTER TABLE "Product" ALTER COLUMN "isFeatured" SET DEFAULT false;
 </file>
 
+<file path="prisma/migrations/20250406094306_add_review/migration.sql">
+-- CreateTable
+CREATE TABLE "Review" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "userId" UUID NOT NULL,
+    "productId" UUID NOT NULL,
+    "rating" INTEGER NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "isVerifiedPurchase" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Review_pkey" PRIMARY KEY ("id")
+);
+
+-- AddForeignKey
+ALTER TABLE "Review" ADD CONSTRAINT "Review_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Review" ADD CONSTRAINT "Review_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+</file>
+
 <file path="prisma/migrations/migration_lock.toml">
 # Please do not edit this file manually
 # It should be added in your version-control system (e.g., Git)
 provider = "postgresql"
-</file>
-
-<file path="public/images/logo.svg">
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<!-- Creator: CorelDRAW X5 -->
-<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="2048px" height="2048px" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd"
-viewBox="0 0 2048 2048"
- xmlns:xlink="http://www.w3.org/1999/xlink">
- <defs>
-  <style type="text/css">
-   <![CDATA[
-    .fil0 {fill:#FFCA28}
-    .fil1 {fill:#FFFFFE;fill-rule:nonzero}
-   ]]>
-  </style>
- </defs>
- <g id="Layer_x0020_1">
-  <metadata id="CorelCorpID_0Corel-Layer"/>
-  <rect class="fil0" width="2048" height="2048" rx="256" ry="256"/>
-  <g id="_617655424">
-   <path class="fil1" d="M1601 765l28 0 5 28 158 688 0 182 -1536 0 0 -189 159 -682 5 -28 28 0 206 0c-17,64 -28,130 -31,192 -1,28 -4,58 15,81 13,15 31,22 50,22 46,0 65,-33 67,-74 0,-8 0,-16 1,-24 4,-63 17,-132 37,-197l461 0c24,75 38,155 38,228 0,37 30,67 67,67 37,0 67,-30 67,-67 0,-74 -11,-152 -32,-228l209 0z"/>
-   <path class="fil1" d="M688 1032c-39,0 -34,-41 -32,-67 6,-102 35,-232 88,-340 58,-120 146,-215 261,-225 16,-1 30,-1 46,1 90,12 169,85 229,185 69,116 112,272 112,412 0,18 -15,33 -33,33 -18,0 -33,-15 -33,-33 0,-128 -40,-271 -103,-378 -48,-80 -108,-139 -172,-152 -14,-3 -30,-3 -44,-2 -86,9 -154,88 -202,187 -48,99 -76,218 -81,312 -1,25 5,66 -34,66z"/>
-  </g>
- </g>
-</svg>
 </file>
 
 <file path="README.md">
@@ -7345,126 +6555,243 @@ declare module 'next-auth' {
 }
 </file>
 
-<file path="app/(root)/page.tsx">
-import ProductList from '@/components/shared/product/product-list';
-import {
-  getLatestProducts,
-  getFeaturedProducts,
-} from '@/lib/actions/product.actions';
-import ProductCarousel from '@/components/shared/product/product-carousel';
-import ViewAllProductsButton from '@/components/view-all-products-button';
+<file path="app/(root)/order/[id]/page.tsx">
+import { Metadata } from 'next';
+import { getOrderById } from '@/lib/actions/order.actions';
+import { notFound } from 'next/navigation';
+import OrderDetailsTable from './order-details-table';
+import { ShippingAddress } from '@/types';
+import { auth } from '@/auth';
+import Stripe from 'stripe';
 
-
-
-const Homepage = async () => {
-  const latestProducts = await getLatestProducts();
-  const featuredProducts = await getFeaturedProducts();
-
-  return (
-    <>
-      {featuredProducts.length > 0 && (
-        <ProductCarousel data={featuredProducts} />
-      )}
-      <ProductList data={latestProducts} title='Newest Arrivals' limit={4} />
-      <ViewAllProductsButton />
-    </>
-  );
+export const metadata: Metadata = {
+  title: 'Order Details',
 };
 
-export default Homepage;
+
+const OrderDetailsPage = async (props: {
+    params: Promise<{
+      id: string;
+    }>;
+  }) => {
+    const { id } = await props.params;
+
+    const order = await getOrderById(id);
+    if (!order) notFound();
+
+    const session = await auth();
+
+    let client_secret = null;
+
+    // Check if is not paid and using stripe
+    if (order.paymentMethod === 'Stripe' && !order.isPaid) {
+      // Init stripe instance
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+      // Create payment intent
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(Number(order.totalPrice) * 100),
+        currency: 'USD',
+        metadata: { orderId: order.id },
+      });
+      client_secret = paymentIntent.client_secret;
+    }
+
+    return (
+        <OrderDetailsTable
+          order={{
+            ...order,
+            shippingAddress: order.shippingAddress as ShippingAddress,
+          }}
+          stripeClientSecret={client_secret}
+          paypalClientId={process.env.PAYPAL_CLIENT_ID || 'sb'}
+          isAdmin={session?.user?.role === 'admin' || false}
+        />
+      );      
+  };  
+
+export default OrderDetailsPage;
 </file>
 
-<file path="app/(root)/product/[slug]/page.tsx">
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card'
-import { getProductBySlug } from "@/lib/actions/product.actions";
-import { notFound } from "next/navigation";
-import ProductPrice from '@/components/shared/product/product-price';
-import ProductImages from '@/components/shared/product/product-images';
-import AddToCart from '@/components/shared/product/add-to-cart';
-import { getMyCart } from '@/lib/actions/cart.actions';
+<file path="app/(root)/product/[slug]/review-form.tsx">
+'use client';
 
-const ProductDetailsPage = async (props: {
-    params: Promise<{ slug: string }>;
-}) => {
-    const { slug } = await props.params;
+import { insertReviewSchema } from "@/lib/validators";
+import { useState } from "react";
+import { SubmitHandler, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import {
+    Form,
+    FormControl,
+    FormField,
+    FormItem,
+    FormLabel,
+    FormMessage,
+  } from '@/components/ui/form';
+  import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+  } from '@/components/ui/select';
+  import { StarIcon } from 'lucide-react';
+  import { Textarea } from '@/components/ui/textarea';
+  import { Input } from '@/components/ui/input';
+  import { reviewFormDefaultValues } from '@/lib/constants';
+  import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+  } from '@/components/ui/dialog';
+  import { Button } from '@/components/ui/button';
+  import { createUpdateReview, getReviewByProductId } from '@/lib/actions/review.actions';
+  import { toast } from 'sonner';
 
-    const product = await getProductBySlug(slug);
-    if (!product) notFound();
+  const ReviewForm = ({
+    userId,
+    productId,
+    onReviewSubmitted,
+  }: {
+    userId: string;
+    productId: string;
+    onReviewSubmitted: () => void;
+  }) => {
+    const [open, setOpen] = useState(false);
 
-    const cart = await getMyCart();
+    const form = useForm<z.infer<typeof insertReviewSchema>>({
+        resolver: zodResolver(insertReviewSchema),
+        defaultValues: reviewFormDefaultValues,
+      });
+      
+       // Open Form Handler
+       const handleOpenForm = async () => {
+        form.setValue('productId', productId);
+        form.setValue('userId', userId);
 
-    return <>
-        <section>
+        const review = await getReviewByProductId({ productId });
 
-            <div className="grid grid-cols-1 md:grid-cols-5">
+        if (review) {
+          form.setValue('title', review.title);
+          form.setValue('description', review.description);
+          form.setValue('rating', review.rating);
+        }
 
-                {/* Images Column */}
-                <div className="col-span-2">
-                   <ProductImages images={product.images} /> 
+        setOpen(true);
+      }
+
+      // Submit Form Handler
+      const onSubmit: SubmitHandler<z.infer<typeof insertReviewSchema>> = async (
+        values
+      ) => {
+        const res = await createUpdateReview({ ...values, productId });
+
+        if (!res.success) {
+          // Use Sonner toast for error
+          toast.error(res.message);
+          return;
+        }
+
+        setOpen(false);
+
+        onReviewSubmitted();
+
+        toast.success(res.message);
+      };
+      
+      return (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <Button onClick={handleOpenForm} variant='default'>
+            Write a Review
+          </Button>
+          <DialogContent className='sm:max-w-[425px]'>
+            <Form {...form}>
+            <form method='post' onSubmit={form.handleSubmit(onSubmit)}>
+               <DialogHeader>
+                <DialogTitle>Write a Review</DialogTitle>
+                <DialogDescription>
+                    Share your thoughts with other customers
+                </DialogDescription>
+               </DialogHeader>
+               <div className="grid gap-4 py-4">
+                <FormField
+                    control={form.control}
+                    name='title'
+                    render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Title</FormLabel>
+                        <FormControl>
+                        <Input placeholder='Enter title' {...field} />
+                        </FormControl>
+                    </FormItem>
+                    )}
+                 />
+                <FormField
+                    control={form.control}
+                    name='description'
+                    render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Description</FormLabel>
+                        <FormControl>
+                        <Textarea placeholder='Enter description' {...field} />
+                        </FormControl>
+                    </FormItem>
+                    )}
+                 />
+                <FormField
+                    control={form.control}
+                    name='rating'
+                    render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Rating</FormLabel>
+                        <Select
+                            onValueChange={field.onChange}
+                            value={field.value.toString()}
+                        >
+                            <FormControl>
+                                <SelectTrigger>
+                                <SelectValue />
+                                </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                {Array.from({ length: 5 }).map((_, index) => (
+                                    <SelectItem
+                                    key={index}
+                                    value={(index + 1).toString()}
+                                    >
+                                    {index + 1}{' '}
+                                    <StarIcon className='inline h-4 w-4' />
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <FormMessage />
+                    </FormItem>
+                    )}
+                 />
                 </div>
-
-              <div className="col-span-2 p-5">
-
-                <div className="flex flex-col gap-6">
-                    <p>
-                        {product.brand} {product.category}
-                    </p>
-                    <h1 className="h3-bold">{product.name}</h1>
-                    <p>
-                        {product.rating} of {product.numReviews} Reviews
-                    </p>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                        <ProductPrice value={Number(product.price)} 
-                        className='w-24 rounded-full bg-green-100 text-green-700 px-5 py-2' />
-                    </div>
-                </div>
-                <div className="mt-10">
-                    <p className="font-semibold">Description</p>
-                    <p>{product.description}</p>
-                </div>
-              </div>  
-              {/* Action Column */}
-              <div>
-                <Card>
-                    <CardContent className="p-4">
-                        <div className="mb-2 flex justify-between">
-                            <div>Price</div>
-                            <div>
-                                <ProductPrice value={Number(product.price)} />
-                            </div>
-                        </div>
-                        <div className="mb-2 flex justify-between">
-                            <div>Status</div>
-                            {product.stock > 0 ? (
-                                <Badge variant='outline'>In Stock</Badge>
-                            ) : (
-                                <Badge variant='destructive'>Out Of Stock</Badge>
-                            )}
-                        </div>
-                        {product.stock > 0 && (
-                            <div className="flex-center">
-                                <AddToCart 
-                                cart={cart}
-                                item={{
-                                    productId: product.id,
-                                    name: product.name,
-                                    slug: product.slug,
-                                    price: product.price,
-                                    qty: 1,
-                                    image: product.images![0],
-                                }} />
-                            </div>
-                        ) }
-                    </CardContent>
-                </Card>
-              </div>
-            </div>
-        </section>
-    </>;
-};
- 
-export default ProductDetailsPage;
+                <DialogFooter>
+                    <Button
+                        type='submit'
+                        size='lg'
+                        className='w-full'
+                        disabled={form.formState.isSubmitting}
+                    >
+                        {form.formState.isSubmitting ? 'Submitting...' : 'Submit'}
+                    </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+      );
+    };
+      
+    
+    export default ReviewForm;
 </file>
 
 <file path="assets/styles/globals.css">
@@ -7749,6 +7076,362 @@ export const config = {
 export const { handlers, auth, signIn, signOut } = NextAuth(config);
 </file>
 
+<file path="components/admin/product-form.tsx">
+'use client';
+
+import { toast } from "sonner";
+import { productDefaultValues } from '@/lib/constants';
+import { insertProductSchema, updateProductSchema } from '@/lib/validators';
+import { Product } from '@/types';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useRouter } from 'next/navigation';
+import { ControllerRenderProps, SubmitHandler, useForm } from 'react-hook-form';
+import { z } from 'zod';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '../ui/form';
+import slugify from 'slugify';
+import { Input } from '../ui/input';
+import { Button } from '../ui/button';
+import { Textarea } from '../ui/textarea';
+import { createProduct, updateProduct } from '@/lib/actions/product.actions';
+import { UploadButton } from '@/lib/uploadthing';
+import { Card, CardContent } from '../ui/card';
+import Image from 'next/image';
+import { Checkbox } from '../ui/checkbox';
+
+// Define a union type that can handle both insert and update schemas
+type FormValues = z.infer<typeof insertProductSchema> & { id?: string };
+
+const ProductForm = ({
+  type,
+  product,
+  productId,
+}: {
+  type: 'Create' | 'Update';
+  product?: Product;
+  productId?: string;
+}) => {
+  const router = useRouter();
+
+  // Convert string values to appropriate types for the form
+  const processedDefaultValues = {
+    ...productDefaultValues,
+    stock: Number(productDefaultValues.stock),
+  };
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(type === 'Update' ? updateProductSchema : insertProductSchema),
+    defaultValues: product && type === 'Update' 
+      ? { ...product, id: productId } 
+      : processedDefaultValues,
+  });
+
+  const onSubmit: SubmitHandler<FormValues> = async (values) => {
+    // On Create
+    if (type === 'Create') {
+      const res = await createProduct(values);
+
+      if (!res.success) {
+        toast.error(res.message); 
+      } else {
+        toast.success(res.message); 
+        router.push('/admin/products');
+      }
+    }
+
+    // On Update
+    if (type === 'Update') {
+      if (!productId) {
+        router.push('/admin/products');
+        return;
+      }
+
+      const res = await updateProduct({ ...values, id: productId });
+
+      if (!res.success) {
+        toast.error(res.message);
+      } else {
+        toast.success(res.message);
+        router.push('/admin/products');
+      }
+    }
+  };
+
+  const images = form.watch('images');
+  const isFeatured = form.watch('isFeatured');
+  const banner = form.watch('banner');
+
+  return (
+    <Form {...form}>
+      <form
+        method='POST'
+        onSubmit={form.handleSubmit(onSubmit)}
+        className='space-y-8'
+      >
+        <div className='flex flex-col md:flex-row gap-5'>
+          {/* Name */}
+          <FormField
+            control={form.control}
+            name='name'
+            render={({
+              field,
+            }: {
+              field: ControllerRenderProps<FormValues, 'name'>;
+            }) => (
+              <FormItem className='w-full'>
+                <FormLabel>Name</FormLabel>
+                <FormControl>
+                  <Input placeholder='Enter product name' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          {/* Slug */}
+          <FormField
+            control={form.control}
+            name='slug'
+            render={({
+              field,
+            }: {
+              field: ControllerRenderProps<FormValues, 'slug'>;
+            }) => (
+              <FormItem className='w-full'>
+                <FormLabel>Slug</FormLabel>
+                <FormControl>
+                  <div className='relative'>
+                    <Input placeholder='Enter slug' {...field} />
+                    <Button
+                      type='button'
+                      className='bg-gray-500 hover:bg-gray-600 text-white px-4 py-1 mt-2'
+                      onClick={() => {
+                        form.setValue(
+                          'slug',
+                          slugify(form.getValues('name'), { lower: true })
+                        );
+                      }}
+                    >
+                      Generate
+                    </Button>
+                  </div>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div className='flex flex-col md:flex-row gap-5'>
+          {/* Category */}
+          <FormField
+            control={form.control}
+            name='category'
+            render={({
+              field,
+            }: {
+              field: ControllerRenderProps<FormValues, 'category'>;
+            }) => (
+              <FormItem className='w-full'>
+                <FormLabel>Category</FormLabel>
+                <FormControl>
+                  <Input placeholder='Enter category' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          {/* Brand */}
+          <FormField
+            control={form.control}
+            name='brand'
+            render={({
+              field,
+            }: {
+              field: ControllerRenderProps<FormValues, 'brand'>;
+            }) => (
+              <FormItem className='w-full'>
+                <FormLabel>Brand</FormLabel>
+                <FormControl>
+                  <Input placeholder='Enter brand' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div className='flex flex-col md:flex-row gap-5'>
+          {/* Price */}
+          <FormField
+            control={form.control}
+            name='price'
+            render={({
+              field,
+            }: {
+              field: ControllerRenderProps<FormValues, 'price'>;
+            }) => (
+              <FormItem className='w-full'>
+                <FormLabel>Price</FormLabel>
+                <FormControl>
+                  <Input placeholder='Enter product price' {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          {/* Stock */}
+          <FormField
+            control={form.control}
+            name='stock'
+            render={({
+              field,
+            }: {
+              field: ControllerRenderProps<FormValues, 'stock'>;
+            }) => (
+              <FormItem className='w-full'>
+                <FormLabel>Stock</FormLabel>
+                <FormControl>
+                  <Input 
+                    type="number"
+                    placeholder='Enter stock' 
+                    {...field} 
+                    onChange={(e) => field.onChange(Number(e.target.value))}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div className='upload-field flex flex-col md:flex-row gap-5'>
+          {/* Images */}
+          <FormField
+            control={form.control}
+            name='images'
+            render={() => (
+              <FormItem className='w-full'>
+                <FormLabel>Images</FormLabel>
+                <Card>
+                  <CardContent className='space-y-2 mt-2 min-h-48'>
+                    <div className='flex-start space-x-2'>
+                      {images.map((image: string) => (
+                        <Image
+                          key={image}
+                          src={image}
+                          alt='product image'
+                          className='w-20 h-20 object-cover object-center rounded-sm'
+                          width={100}
+                          height={100}
+                        />
+                      ))}
+                      <FormControl>
+                        <UploadButton
+                          endpoint='imageUploader'
+                          onClientUploadComplete={(res: { url: string }[]) => {
+                            form.setValue('images', [...images, res[0].url]);
+                          }}
+                          onUploadError={(error: Error) => {
+                            toast.error(`ERROR! ${error.message}`); 
+                          }}
+                        />
+                      </FormControl>
+                    </div>
+                  </CardContent>
+                </Card>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div className='upload-field'>
+          {/* isFeatured */}
+          Featured Product
+          <Card>
+            <CardContent className='space-y-2 mt-2'>
+              <FormField
+                control={form.control}
+                name='isFeatured'
+                render={({ field }) => (
+                  <FormItem className='space-x-2 items-center'>
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <FormLabel>Is Featured?</FormLabel>
+                  </FormItem>
+                )}
+              />
+              {isFeatured && banner && (
+                <Image
+                  src={banner}
+                  alt='banner image'
+                  className='w-full object-cover object-center rounded-sm'
+                  width={1920}
+                  height={680}
+                />
+              )}
+              {isFeatured && !banner && (
+                <UploadButton
+                  endpoint="imageUploader"
+                  onClientUploadComplete={(res: { url: string }[]) => {
+                    form.setValue("banner", res[0].url);
+                  }}
+                  onUploadError={(error: Error) => {
+                    toast.error(`ERROR! ${error.message}`);
+                  }}
+                />
+              )}
+            </CardContent>
+          </Card>
+          </div>
+        <div>
+          {/* Description */}
+          <FormField
+            control={form.control}
+            name='description'
+            render={({
+              field,
+            }: {
+              field: ControllerRenderProps<FormValues, 'description'>;
+            }) => (
+              <FormItem className='w-full'>
+                <FormLabel>Description</FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder='Enter product description'
+                    className='resize-none'
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+        <div>
+          <Button
+            type='submit'
+            size='lg'
+            disabled={form.formState.isSubmitting}
+            className='button col-span-2 w-full'
+          >
+            {form.formState.isSubmitting ? 'Submitting' : `${type} Product`}
+          </Button>
+        </div>
+      </form>
+    </Form>
+  );
+};
+
+export default ProductForm;
+</file>
+
 <file path="components/shared/header/index.tsx">
 import Image from 'next/image';
 import Link from 'next/link';
@@ -7786,49 +7469,109 @@ const Header = () => {
 export default Header;
 </file>
 
-<file path="components/shared/header/menu.tsx">
-import { Button } from "@/components/ui/button";
-import ModeToggle from "./mode-toggle";
+<file path="components/shared/product/product-card.tsx">
 import Link from "next/link";
-import { EllipsisVertical, ShoppingCart, UserIcon } from "lucide-react";
-import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import UserButton from "./user-button";
+import Image from "next/image";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import ProductPrice from "./product-price";
+import { Product } from '@/types';
+import Rating from '@/components/shared/product/rating';
 
-const Menu = () => {
-    return (
-    <div className="flex justify-end gap-3">
-        <nav className="hidden md:flex w-full max-w-xs gap-1">
-        <ModeToggle />
-                <Button asChild variant='ghost'>
-                    <Link href='/cart'>
-                        <ShoppingCart /> Cart
-                    </Link>
-                </Button>
-                <UserButton />
-        </nav>
-        <nav className="md:hidden">
-            <Sheet>
-                <SheetTrigger className='align-middle'>
-                    <EllipsisVertical />
-                </SheetTrigger>
-                <SheetContent className='flex flex-col items-start'>
-                    <SheetTitle>Menu</SheetTitle>
-                    <ModeToggle />
-                    <Button asChild variant='ghost'>
-                        <Link href='/cart'>
-                            <ShoppingCart /> Cart
-                        </Link>
-                    </Button>
-                    <UserButton />
-                    <SheetDescription></SheetDescription>
-                </SheetContent>
-            </Sheet>
-        </nav>
-    </div>
-    );
+const ProductCard = ({ product }: { product: Product }) => {
+    return (<Card className="w-full max-w-sm">
+        <CardHeader className="p-0 items-center">
+            <Link href={`/product/${product.slug}`}>
+            <Image 
+                src={product.images[0]} 
+                alt={product.name} 
+                height={300} 
+                width={300} 
+                priority={true} />
+            </Link>
+        </CardHeader>
+        <CardContent className='p-4 grid gap-4'>
+            <div className="text-xs">{product.brand}</div>
+            <Link href={`/product/${product.slug}`}>
+                <h2 className="text-sm font-medium">{ product.name }</h2>
+            </Link>
+            <div className="flex-between gap-4">
+                <Rating value={Number(product.rating)} />
+                { product.stock > 0 ? (
+                    <ProductPrice value={Number(product.price)}/>
+                ) : (
+                    <p className="text-destructive">Out of Stock</p>
+                ) }
+            </div>
+        </CardContent>
+    </Card>);
 }
  
-export default Menu;
+export default ProductCard;
+</file>
+
+<file path="components/shared/product/product-carousel.tsx">
+'use client';
+
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from '@/components/ui/carousel';
+import { Product } from '@/types';
+import Autoplay from 'embla-carousel-autoplay';
+import Link from 'next/link';
+import Image from 'next/image';
+
+const ProductCarousel = ({ data }: { data: Product[] }) => {
+  return (
+    <Carousel
+      className='w-full mb-12'
+      opts={{
+        loop: true,
+      }}
+      plugins={[
+        Autoplay({
+          delay: 10000,
+          stopOnInteraction: true,
+          stopOnMouseEnter: true,
+        }),
+      ]}
+    >
+      <CarouselContent>
+        {data
+          // skip products that don’t actually have a usable banner
+          .filter((p) => p.banner)          
+          .map((product) => (
+             <CarouselItem key={product.id}>
+               <Link href={`/product/${product.slug}`}>
+                 <div className='relative mx-auto'>
+                  <Image                       
+                    src={product.banner!}       
+                     alt={product.name}
+                     height={0}
+                     width={0}
+                     sizes='100vw'
+                     className='w-full h-auto'
+                   />
+                <div className='absolute inset-0 flex items-end justify-center'>
+                  <h2 className='bg-gray-900 bg-opacity-50 text-2xl font-bold px-2 text-white'>
+                    {product.name}
+                  </h2>
+                </div>
+              </div>
+            </Link>
+          </CarouselItem>
+        ))}
+      </CarouselContent>
+      <CarouselPrevious />
+      <CarouselNext />
+    </Carousel>
+  );
+};
+
+export default ProductCarousel;
 </file>
 
 <file path="db/prisma.ts">
@@ -7924,133 +7667,6 @@ export const prisma = new PrismaClient({ adapter }).$extends({
     },
   },
 });
-</file>
-
-<file path="db/sample-data.ts">
-import { hashSync } from 'bcrypt-ts-edge';
-
-const sampleData = {
-  users: [
-    {
-      name: 'John',
-      email: 'admin@example.com',
-      password: hashSync('123456', 10),
-      role: 'admin'
-    },
-    {
-      name: 'Jane',
-      email: 'user@example.com',
-      password: hashSync('123456', 10),
-      role: 'user'
-    },
-  ],
-  products: [
-    {
-      name: 'Polo Sporting Stretch Shirt',
-      slug: 'polo-sporting-stretch-shirt',
-      category: "Men's Dress Shirts",
-      description: 'Classic Polo style with modern comfort',
-      images: [
-        '/images/sample-products/p1-1.jpg',
-        '/images/sample-products/p1-2.jpg',
-      ],
-      price: 59.99,
-      brand: 'Polo',
-      rating: 4.5,
-      numReviews: 10,
-      stock: 5,
-      isFeatured: true,
-      banner: 'banner-1.jpg',
-    },
-    {
-      name: 'Brooks Brothers Long Sleeved Shirt',
-      slug: 'brooks-brothers-long-sleeved-shirt',
-      category: "Men's Dress Shirts",
-      description: 'Timeless style and premium comfort',
-      images: [
-        '/images/sample-products/p2-1.jpg',
-        '/images/sample-products/p2-2.jpg',
-      ],
-      price: 85.9,
-      brand: 'Brooks Brothers',
-      rating: 4.2,
-      numReviews: 8,
-      stock: 10,
-      isFeatured: true,
-      banner: 'banner-2.jpg',
-    },
-    {
-      name: 'Tommy Hilfiger Classic Fit Dress Shirt',
-      slug: 'tommy-hilfiger-classic-fit-dress-shirt',
-      category: "Men's Dress Shirts",
-      description: 'A perfect blend of sophistication and comfort',
-      images: [
-        '/images/sample-products/p3-1.jpg',
-        '/images/sample-products/p3-2.jpg',
-      ],
-      price: 99.95,
-      brand: 'Tommy Hilfiger',
-      rating: 4.9,
-      numReviews: 3,
-      stock: 0,
-      isFeatured: false,
-      banner: null,
-    },
-    {
-      name: 'Calvin Klein Slim Fit Stretch Shirt',
-      slug: 'calvin-klein-slim-fit-stretch-shirt',
-      category: "Men's Dress Shirts",
-      description: 'Streamlined design with flexible stretch fabric',
-      images: [
-        '/images/sample-products/p4-1.jpg',
-        '/images/sample-products/p4-2.jpg',
-      ],
-      price: 39.95,
-      brand: 'Calvin Klein',
-      rating: 3.6,
-      numReviews: 5,
-      stock: 10,
-      isFeatured: false,
-      banner: null,
-    },
-    {
-      name: 'Polo Ralph Lauren Oxford Shirt',
-      slug: 'polo-ralph-lauren-oxford-shirt',
-      category: "Men's Dress Shirts",
-      description: 'Iconic Polo design with refined oxford fabric',
-      images: [
-        '/images/sample-products/p5-1.jpg',
-        '/images/sample-products/p5-2.jpg',
-      ],
-      price: 79.99,
-      brand: 'Polo',
-      rating: 4.7,
-      numReviews: 18,
-      stock: 6,
-      isFeatured: false,
-      banner: null,
-    },
-    {
-      name: 'Polo Classic Pink Hoodie',
-      slug: 'polo-classic-pink-hoodie',
-      category: "Men's Sweatshirts",
-      description: 'Soft, stylish, and perfect for laid-back days',
-      images: [
-        '/images/sample-products/p6-1.jpg',
-        '/images/sample-products/p6-2.jpg',
-      ],
-      price: 99.99,
-      brand: 'Polo',
-      rating: 4.6,
-      numReviews: 12,
-      stock: 8,
-      isFeatured: true,
-      banner: null,
-    },
-  ],
-};
-
-export default sampleData;
 </file>
 
 <file path="db/seed.ts">
@@ -8279,6 +7895,923 @@ export async function getFeaturedProducts() {
 }
 </file>
 
+<file path="lib/actions/review.actions.ts">
+'use server';
+
+import { z } from 'zod';
+import { insertReviewSchema } from '../validators';
+import { formatError } from '../utils';
+import { auth } from '@/auth';
+import { prisma } from '@/db/prisma';
+import { revalidatePath } from 'next/cache';
+
+// Create & Update Reviews
+export async function createUpdateReview(
+  data: z.infer<typeof insertReviewSchema>
+) {
+  try {
+    const session = await auth();
+    if (!session) throw new Error('User is not authenticated');
+
+    // Validate and store the review
+    const review = insertReviewSchema.parse({
+      ...data,
+      userId: session?.user?.id,
+    });
+
+    // Get product that is being reviewed
+    const product = await prisma.product.findFirst({
+      where: { id: review.productId },
+    });
+
+    if (!product) throw new Error('Product not found');
+
+    // Check if user already reviewed
+    const reviewExists = await prisma.review.findFirst({
+      where: {
+        productId: review.productId,
+        userId: review.userId,
+      },
+    });
+
+    await prisma.$transaction(async (tx) => {
+      if (reviewExists) {
+        // Update review
+        await tx.review.update({
+          where: { id: reviewExists.id },
+          data: {
+            title: review.title,
+            description: review.description,
+            rating: review.rating,
+          },
+        });
+      } else {
+        // Create review
+        await tx.review.create({ data: review });
+      }
+
+      // Get avg rating
+      const averageRating = await tx.review.aggregate({
+        _avg: { rating: true },
+        where: { productId: review.productId },
+      });
+
+      // Get number of reviews
+      const numReviews = await tx.review.count({
+        where: { productId: review.productId },
+      });
+
+      // Update the rating and numReviews in product table
+      await tx.product.update({
+        where: { id: review.productId },
+        data: {
+          rating: averageRating._avg.rating || 0,
+          numReviews,
+        },
+      });
+    });
+
+    revalidatePath(`/product/${product.slug}`);
+
+    return {
+      success: true,
+      message: 'Review Updated Successfully',
+    };
+  } catch (error) {
+    return { success: false, message: formatError(error) };
+  }
+}
+
+// Get all reviews for a product
+export async function getReviews({ productId }: { productId: string }) {
+  const data = await prisma.review.findMany({
+    where: {
+      productId: productId,
+    },
+    include: {
+      user: {
+        select: {
+          name: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
+  return { data };
+}
+
+// Get a review written by the current user
+export async function getReviewByProductId({
+  productId,
+}: {
+  productId: string;
+}) {
+  const session = await auth();
+
+  if (!session) throw new Error('User is not authenticated');
+
+  return await prisma.review.findFirst({
+    where: {
+      productId,
+      userId: session?.user?.id,
+    },
+  });
+}
+</file>
+
+<file path="public/images/logo.svg">
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Creator: CorelDRAW X5 --><svg height="2048px" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd" viewBox="0 0 2048 2048" width="2048px" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<defs>
+<style type="text/css">
+   
+    .fil0 {fill:#0D1B2A}
+    .fil1 {fill:#E0E1DD;fill-rule:nonzero}
+   
+  </style>
+</defs>
+<g id="Layer_x0020_1">
+<metadata id="CorelCorpID_0Corel-Layer"/>
+<rect class="fil0" height="2048" rx="256" ry="256" width="2048"/>
+<g id="_617655424">
+<path class="fil1" d="M1601 765l28 0 5 28 158 688 0 182 -1536 0 0 -189 159 -682 5 -28 28 0 206 0c-17,64 -28,130 -31,192 -1,28 -4,58 15,81 13,15 31,22 50,22 46,0 65,-33 67,-74 0,-8 0,-16 1,-24 4,-63 17,-132 37,-197l461 0c24,75 38,155 38,228 0,37 30,67 67,67 37,0 67,-30 67,-67 0,-74 -11,-152 -32,-228l209 0z"/>
+<path class="fil1" d="M688 1032c-39,0 -34,-41 -32,-67 6,-102 35,-232 88,-340 58,-120 146,-215 261,-225 16,-1 30,-1 46,1 90,12 169,85 229,185 69,116 112,272 112,412 0,18 -15,33 -33,33 -18,0 -33,-15 -33,-33 0,-128 -40,-271 -103,-378 -48,-80 -108,-139 -172,-152 -14,-3 -30,-3 -44,-2 -86,9 -154,88 -202,187 -48,99 -76,218 -81,312 -1,25 5,66 -34,66z"/>
+</g>
+</g>
+</svg>
+</file>
+
+<file path="tailwind.config.ts">
+import type { Config } from "tailwindcss";
+
+export default {
+    darkMode: ["class"],
+    content: [
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: {
+  	extend: {
+  		colors: {
+  			background: 'hsl(var(--background))',
+  			foreground: 'hsl(var(--foreground))',
+  			card: {
+  				DEFAULT: 'hsl(var(--card))',
+  				foreground: 'hsl(var(--card-foreground))'
+  			},
+  			popover: {
+  				DEFAULT: 'hsl(var(--popover))',
+  				foreground: 'hsl(var(--popover-foreground))'
+  			},
+  			primary: {
+  				DEFAULT: 'hsl(var(--primary))',
+  				foreground: 'hsl(var(--primary-foreground))'
+  			},
+  			secondary: {
+  				DEFAULT: 'hsl(var(--secondary))',
+  				foreground: 'hsl(var(--secondary-foreground))'
+  			},
+  			muted: {
+  				DEFAULT: 'hsl(var(--muted))',
+  				foreground: 'hsl(var(--muted-foreground))'
+  			},
+  			accent: {
+  				DEFAULT: 'hsl(var(--accent))',
+  				foreground: 'hsl(var(--accent-foreground))'
+  			},
+  			destructive: {
+  				DEFAULT: 'hsl(var(--destructive))',
+  				foreground: 'hsl(var(--destructive-foreground))'
+  			},
+  			border: 'hsl(var(--border))',
+  			input: 'hsl(var(--input))',
+  			ring: 'hsl(var(--ring))',
+  			chart: {
+  				'1': 'hsl(var(--chart-1))',
+  				'2': 'hsl(var(--chart-2))',
+  				'3': 'hsl(var(--chart-3))',
+  				'4': 'hsl(var(--chart-4))',
+  				'5': 'hsl(var(--chart-5))'
+  			}
+  		},
+  		borderRadius: {
+  			lg: 'var(--radius)',
+  			md: 'calc(var(--radius) - 2px)',
+  			sm: 'calc(var(--radius) - 4px)'
+  		}
+  	}
+  },
+  plugins: [require("tailwindcss-animate")],
+} satisfies Config;
+</file>
+
+<file path="app/layout.tsx">
+import type { Metadata } from "next";
+// import { Geist, Geist_Mono } from "next/font/google";  (default)
+import { Inter } from "next/font/google";
+// import "./globals.css";                                (default, in the same folder)
+import "@/assets/styles/globals.css";
+import { APP_DESCRIPTION, APP_NAME, SERVER_URL } from '@/lib/constants';
+import { ThemeProvider } from "next-themes";
+import { Toaster } from '@/components/ui/sonner';
+
+const inter = Inter({subsets: ['latin']});
+
+export const metadata: Metadata = {
+  title: {
+    template: `%s | Prostore`,
+    default: APP_NAME,
+  },
+  description: APP_DESCRIPTION,
+  metadataBase: new URL(SERVER_URL)
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body
+     // className={`${geistSans.variable} ${geistMono.variable} antialiased`} (default)
+        className={`${inter.className} antialiased`}>
+          <ThemeProvider
+            attribute='class'
+            defaultTheme="light"
+            enableSystem
+            disableTransitionOnChange
+          >
+            {children}
+            <Toaster />
+          </ThemeProvider>
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="components/shared/header/menu.tsx">
+import { Button } from "@/components/ui/button";
+import ModeToggle from "./mode-toggle";
+import Link from "next/link";
+import { EllipsisVertical, ShoppingCart } from "lucide-react";
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import UserButton from "./user-button";
+
+const Menu = () => {
+    return (
+    <div className="flex justify-end gap-3">
+        <nav className="hidden md:flex w-full max-w-xs gap-1">
+        <ModeToggle />
+                <Button asChild variant='ghost'>
+                    <Link href='/cart'>
+                        <ShoppingCart /> Cart
+                    </Link>
+                </Button>
+                <UserButton />
+        </nav>
+        <nav className="md:hidden">
+            <Sheet>
+                <SheetTrigger className='align-middle'>
+                    <EllipsisVertical />
+                </SheetTrigger>
+                <SheetContent className='flex flex-col items-start'>
+                    <SheetTitle>Menu</SheetTitle>
+                    <ModeToggle />
+                    <Button asChild variant='ghost'>
+                        <Link href='/cart'>
+                            <ShoppingCart /> Cart
+                        </Link>
+                    </Button>
+                    <UserButton />
+                    <SheetDescription></SheetDescription>
+                </SheetContent>
+            </Sheet>
+        </nav>
+    </div>
+    );
+}
+ 
+export default Menu;
+</file>
+
+<file path="email/purchase-receipt.tsx">
+import {
+    Body,
+    Column,
+    Container,
+    Head,
+    Heading,
+    Html,
+    Img,
+    Preview,
+    Row,
+    Section,
+    Tailwind,
+    Text,
+  } from '@react-email/components';
+  import { Order } from '@/types';
+  import { formatCurrency } from '@/lib/utils';
+  import 'dotenv/config';
+  import sampleData from '@/db/sample-data';
+
+  PurchaseReceiptEmail.PreviewProps = {
+    order: {
+      id: Math.random().toString(36).substring(2, 10),
+      userId: '123',
+      user: {
+        name: 'John Doe',
+        email: 'test@test.com',
+      },
+      paymentMethod: 'Stripe',
+      shippingAddress: {
+        fullName: 'John Doe',
+        streetAddress: '123 Main st',
+        city: 'New York',
+        postalCode: '10001',
+        country: 'US',
+      },
+      createdAt: new Date(),
+      totalPrice: '100',
+      taxPrice: '10',
+      shippingPrice: '10',
+      itemsPrice: '80',
+      orderitems: sampleData.products.map((x) => ({
+        name: x.name,
+        orderId: '123',
+        productId: '123',
+        slug: x.slug,
+        qty: x.stock,
+        image: x.images[0],
+        price: x.price.toString(),
+      })),
+      isDelivered: true,
+      deliveredAt: new Date(),
+      isPaid: true,
+      paidAt: new Date(),
+      paymentResult: {
+        id: '123',
+        status: 'succeeded',
+        pricePaid: '100',
+        email_address: 'test@test.com',
+      },
+    },
+  } satisfies OrderInformationProps;
+  
+  const dateFormatter = new Intl.DateTimeFormat('en', { dateStyle: 'medium' });
+  
+  type OrderInformationProps = {
+    order: Order;
+  };
+
+  export default function PurchaseReceiptEmail({ order }: OrderInformationProps) {
+    return (
+      <Html>
+        <Preview>View order receipt</Preview>
+        <Tailwind>
+          <Head />
+          <Body className='font-sans bg-white'>
+            <Container className='max-w-xl'>
+              <Heading>Purchase Receipt</Heading>
+              <Section>
+                <Row>
+                  <Column>
+                    <Text className='mb-0 mr-4 text-gray-500 whitespace-nowrap text-nowrap'>
+                      Order ID
+                    </Text>
+                    <Text className='mt-0 mr-4'>{order.id.toString()}</Text>
+                  </Column>
+                  <Column>
+                    <Text className='mb-0 mr-4 text-gray-500 whitespace-nowrap text-nowrap'>
+                      Purchase Date
+                    </Text>
+                    <Text className='mt-0 mr-4'>
+                      {dateFormatter.format(order.createdAt)}
+                    </Text>
+                  </Column>
+                  <Column>
+                    <Text className='mb-0 mr-4 text-gray-500 whitespace-nowrap text-nowrap'>
+                      Price Paid
+                    </Text>
+                    <Text className='mt-0 mr-4'>
+                      {formatCurrency(order.totalPrice)}
+                    </Text>
+                  </Column>
+                </Row>
+              </Section>
+              <Section className='border border-solid border-gray-500 rounded-lg p-4 md:p-6 my-4'>
+                {order.orderitems.map((item) => (
+                  <Row key={item.productId} className='mt-8'>
+                    <Column className='w-20'>
+                      <Img
+                        width='80'
+                        alt={item.name}
+                        className='rounded'
+                        src={
+                          item.image.startsWith('/')
+                            ? `${process.env.NEXT_PUBLIC_SERVER_URL}${item.image}`
+                            : item.image
+                        }
+                      />
+                    </Column>
+                    <Column className='align-top'>
+                      {item.name} x {item.qty}
+                    </Column>
+                    <Column align='right' className='align-top'>
+                      {formatCurrency(item.price)}
+                    </Column>
+                  </Row>
+                ))}
+                {[
+                { name: 'Items', price: order.itemsPrice },
+                { name: 'Tax', price: order.taxPrice },
+                { name: 'Shipping', price: order.shippingPrice },
+                { name: 'Total', price: order.totalPrice },
+              ].map(({ name, price }) => (
+                <Row key={name} className='py-1'>
+                  <Column align='right'>{name}: </Column>
+                  <Column align='right' width={70} className='align-top'>
+                    <Text className='m-0'>{formatCurrency(price)}</Text>
+                  </Column>
+                </Row>
+              ))}
+              </Section>
+            </Container>
+          </Body>
+        </Tailwind>
+      </Html>
+    );
+  };
+</file>
+
+<file path="lib/actions/order.actions.ts">
+'use server';
+
+import { convertToPlainObject, formatError } from '../utils';
+import { auth } from '@/auth';
+import { getMyCart } from './cart.actions';
+import { getUserById } from './user.actions';
+import { insertOrderSchema } from '../validators';
+import { prisma } from '@/db/prisma';
+import { CartItem, PaymentResult, ShippingAddress } from '@/types';
+import { paypal } from '../paypal';
+import { revalidatePath } from 'next/cache';
+import { PAGE_SIZE } from '../constants';
+import { Prisma } from '@prisma/client';
+import { sendPurchaseReceipt } from '@/email';
+
+
+// Create order and create the order items
+
+/**
+ * This function securely handles the process of placing an order in an online store.
+ * It checks if the user is logged in, then fetches their cart and user details.
+ * It validates that the cart isn't empty and that the user has a shipping address and payment method.
+ * Once validated, it creates the order and its items in the database using a single transaction to maintain data consistency.
+ * After the order is saved, it clears the user's cart and returns a success message with a link to the order.
+ * If anything goes wrong, it returns a clear and helpful error message.
+ */
+export async function createOrder() {
+  try {
+    const session = await auth();
+    if (!session) throw new Error('User is not authenticated');
+
+    const cart = await getMyCart();
+    const userId = session?.user?.id;
+    if (!userId) throw new Error('User not found');
+
+    const user = await getUserById(userId);
+
+    if (!cart || cart.items.length === 0) {
+        return { 
+            success: false, 
+            message: 'Your cart is empty', 
+            redirectTo: '/cart',
+        };
+    }
+
+    if (!user.address) {
+        return { 
+            success: false, 
+            message: 'No shipping address', 
+            redirectTo: '/shipping-address',
+        };
+    }
+
+    if (!user.paymentMethod) {
+        return { success: false, 
+            message: 'No payment method', 
+            redirectTo: '/payment-method',
+        };
+    }
+
+    // Create order object
+    const order = insertOrderSchema.parse({
+        userId: user.id,
+        shippingAddress: user.address,
+        paymentMethod: user.paymentMethod,
+        itemsPrice: cart.itemsPrice,
+        shippingPrice: cart.shippingPrice,
+        taxPrice: cart.taxPrice,
+        totalPrice: cart.totalPrice,
+    });
+  
+    // Create a transaction to create order and order items in database
+    const insertedOrderId = await prisma.$transaction(async (tx) => {
+        // Create order
+        const insertedOrder = await tx.order.create({ data: order });
+        // Create order items from the cart items
+        for (const item of cart.items as CartItem[]) {
+        await tx.orderItem.create({
+            data: {
+            ...item,
+            price: item.price,
+            orderId: insertedOrder.id
+            },
+        });
+        }
+
+        // Clear cart
+        await tx.cart.update({
+            where: { id: cart.id },
+            data: {
+            items: [],
+            totalPrice: 0,
+            taxPrice: 0,
+            shippingPrice: 0,
+            itemsPrice: 0
+            },
+        });
+  
+        return insertedOrder.id;
+    });
+  
+    
+    if(!insertedOrderId) throw new Error('Order not created');
+
+    return { 
+        success: true, 
+        message: 'Irder created', 
+        redirectTo: `/order/${insertedOrderId}`,
+    };
+  } catch (error) {
+    // Remove the isRedirectError check
+    return { success: false, message: formatError(error) }
+  }
+}
+
+// Get order by id
+export async function getOrderById(orderId: string) {
+    const data = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+      },
+      include: {
+        orderitems: true,
+        user: { select: { name: true, email: true } },
+      },
+    });
+  
+    return convertToPlainObject(data)
+  }
+  
+// Create new paypal order
+export async function createPayPalOrder(orderId: string) {
+  try {
+    // Get order from database
+    const order = await prisma.order.findFirst({
+      where: {
+        id: orderId
+      }
+    });
+
+    if (order) {
+      // Create paypal order
+      const paypalOrder = await paypal.createOrder(Number(order.totalPrice));
+
+      // Update order with paypal order id
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          paymentResult: {
+            id: paypalOrder.id,
+            email_address: '',
+            status: '',
+            pricePaid: 0
+          }
+        }
+      });
+
+      return {
+        success: true,
+        message: 'Item order created successfully',
+        data: paypalOrder.id,
+      };      
+    } else {
+      throw new Error('Order not found');
+    }    
+  } catch (error) {
+    return { success: false, message: formatError(error) };
+  }
+}
+
+// Approve paypal order and update order to paid
+export async function approvePayPalOrder(
+  orderId: string,
+  data: { orderID: string }
+) {
+  try {
+    // Get order from database
+    const order = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+      },
+    });
+
+    if (!order) throw new Error('Order not found');
+
+    const captureData = await paypal.capturePayment(data.orderID);
+
+    if (
+      !captureData ||
+      captureData.id !== (order.paymentResult as PaymentResult)?.id ||
+      captureData.status !== 'COMPLETED'
+    ) {
+      throw new Error('Error in PayPal payment');
+    }
+
+  // Update order to paid
+  await updateOrderToPaid({
+    orderId,
+    paymentResult: {
+      id: captureData.id,
+      status: captureData.status,
+      email_address: captureData.payer.email_address,
+      pricePaid:
+        captureData.purchase_units[0]?.payments?.captures[0]?.amount?.value,
+    },
+  });
+
+    revalidatePath(`/order/${orderId}`);
+
+  } catch (error) {
+    return { success: false, message: formatError(error) };
+  }
+}
+
+// Update order to paid in database
+export async function updateOrderToPaid({
+  orderId,
+  paymentResult,
+}: {
+  orderId: string;
+  paymentResult?: PaymentResult;
+}) {
+  // Get order from database
+  const order = await prisma.order.findFirst({
+    where: {
+      id: orderId,
+    },
+    include: {
+      orderitems: true,
+    },
+  });
+
+  if (!order) throw new Error('Order not found');
+
+  if (order.isPaid) throw new Error('Order is already paid');
+
+  // Transaction to update the order and the product quantities/stock
+  await prisma.$transaction(async (tx) => {
+    // Update all qty/stock in the db
+    for (const item of order.orderitems) {
+      await tx.product.update({
+        where: {
+          id: item.productId,
+        },
+        data: {
+          stock: {
+            increment: -item.qty,
+          },
+        },
+      });
+    }
+    // Set order to paid
+    await tx.order.update({
+      where: {
+        id: orderId,
+      },
+      data: {
+        isPaid: true,
+        paidAt: new Date(),
+        paymentResult,
+      },
+    });
+  });
+
+  // Get updated order after transaction
+  const updatedOrder = await prisma.order.findFirst({
+    where: { id: orderId },
+    include: {
+      orderitems: true,
+      user: { select: { name: true, email: true } },
+    },
+  });
+
+  if (!updatedOrder) throw new Error('Order not found');
+
+  sendPurchaseReceipt({
+    order: {
+      ...updatedOrder,
+      shippingAddress: updatedOrder.shippingAddress as ShippingAddress,
+      paymentResult: updatedOrder.paymentResult as PaymentResult,
+    },
+  });
+}
+
+// Get user's orders
+export async function getMyOrders({
+  limit = PAGE_SIZE,
+  page,
+}: {
+  limit?: number;
+  page: number;
+}) {
+  const session = await auth();
+  if (!session) throw new Error('User is not authorized');
+
+  const data = await prisma.order.findMany({
+    where: { userId: session?.user?.id },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    skip: (page - 1) * limit,
+  });
+
+  const dataCount = await prisma.order.count({
+    where: { userId: session?.user?.id },
+  });
+
+  return {
+    data,
+    totalPages: Math.ceil(dataCount / limit),
+  };
+}
+
+type SalesDataType = {
+  month: string;
+  totalSales: number;
+}[];
+
+
+// Get sales data and order summary
+export async function getOrderSummary() {
+  // Get counts for each resource
+  const ordersCount = await prisma.order.count();
+  const productsCount = await prisma.product.count();
+  const usersCount = await prisma.user.count();
+
+
+  // Calculate the total sales
+  const totalSales = await prisma.order.aggregate({
+    _sum: { totalPrice: true }
+  });
+
+  // Get monthly sales
+  const salesDataRaw = await prisma.$queryRaw<
+    Array<{ month: string; totalSales: Prisma.Decimal }>
+  >`SELECT to_char("createdAt", 'MM/YY') as "month", sum("totalPrice") as "totalSales" FROM "Order" GROUP BY to_char("createdAt", 'MM/YY')`;
+
+  const salesData: SalesDataType = salesDataRaw.map((entry) => ({
+    month: entry.month,
+    totalSales: Number(entry.totalSales),
+  }));
+
+  // Get latest sales
+  const latestSales = await prisma.order.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: {
+      user: { select: { name: true } },
+    },
+    take: 6,
+  });
+
+  return {
+    ordersCount,
+    productsCount,
+    usersCount,
+    totalSales,
+    latestSales,
+    salesData,
+  };
+}
+
+// Get all orders
+export async function getAllOrders({
+  limit = PAGE_SIZE,
+  page,
+  query,
+}: {
+  limit?: number;
+  page: number;
+  query: string;
+}) {
+  const queryFilter: Prisma.OrderWhereInput =
+    query && query !== 'all'
+      ? {
+          user: {
+            name: {
+              contains: query,
+              mode: 'insensitive',
+            } as Prisma.StringFilter,
+          },
+        }
+      : {};
+
+  const data = await prisma.order.findMany({
+    where: {
+      ...queryFilter,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    skip: (page - 1) * limit,
+    include: { user: { select: { name: true } } },
+  });
+
+  const dataCount = await prisma.order.count();
+
+  return {
+    data,
+    totalPages: Math.ceil(dataCount / limit),
+  };
+}
+
+// Delete an order
+export async function deleteOrder(id: string) {
+  try {
+    await prisma.order.delete({ where: { id } });
+
+    revalidatePath('/admin/orders');
+
+    return {
+      success: true,
+      message: 'Order deleted successfully',
+    };
+  } catch (error) {
+    return { success: false, message: formatError(error) };
+  }
+}
+
+// Update COD order to paid
+export async function updateOrderToPaidCOD(orderId: string) {
+  try {
+    await updateOrderToPaid({ orderId });
+
+    revalidatePath(`/order/${orderId}`);
+
+    return { success: true, message: 'Order marked as paid' };
+  } catch (error) {
+    return { success: false, message: formatError(error) };
+  }
+}
+
+// Update COD order to delivered
+export async function deliverOrder(orderId: string) {
+  try {
+    const order = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+      },
+    });
+
+    if (!order) throw new Error('Order not found');
+    if (!order.isPaid) throw new Error('Order is not paid');
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        isDelivered: true,
+        deliveredAt: new Date(),
+      },
+    });
+
+    revalidatePath(`/order/${orderId}`);
+
+    return {
+      success: true,
+      message: 'Order has been marked delivered',
+    };
+  } catch (error) {
+    return { success: false, message: formatError(error) };
+  }
+}
+</file>
+
 <file path="lib/actions/user.actions.ts">
 'use server';
 
@@ -8313,9 +8846,9 @@ export async function signInWithCredentials(
         await signIn('credentials', user);
 
         return { success: true, message: 'Signed in succesfully!' }
-      } catch (error) {
-        return { success: false, message: 'Invalid email or password' }
-    }
+      } catch {
+        return { success: false, message: 'Invalid email or password' };
+      }
 }
 
 // Sign user out
@@ -8550,21 +9083,46 @@ export function formatNumberWithDecimal(num: number): string {
 
 // Format error 
 // esling-disable-next-line @typescript-eslint/no-explicit-any
-export function formatError(error: any) { 
-  if (error.name === 'ZodError') {
-    // Handle Zod error
-    const fieldErrors = Object.keys(error.errors).map((field) => error.errors[field].message);
+export function formatError(error: unknown): string {
+  // First, ensure error is an object.
+  if (typeof error === "object" && error !== null) {
+    // Cast to a dictionary shape so we can read .name, .code, etc. carefully.
+    const e = error as Record<string, unknown>;
 
-    return fieldErrors.join('. ')
-  } else if (error.name === 'PrismaClientKnownRequestError' && error.code === 'P2002') { 
-    // Handle Prisma error
-    const field = error.meta?.target ? error.meta.target[0] : 'Field';
-    return `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`
-  } else {
-    // Handle other error
-    return typeof error.message === 'string' ? error.message : JSON.stringify(error.message);
+    // Handle Zod error
+    if (e.name === "ZodError" && typeof e.errors === "object" && e.errors !== null) {
+      const errorsObj = e.errors as Record<string, { message: string }>;
+      const fieldErrors = Object.keys(errorsObj).map((field) => errorsObj[field].message);
+      return fieldErrors.join(". ");
+    }
+
+    // Handle Prisma unique constraint error
+    if (
+      e.name === "PrismaClientKnownRequestError" &&
+      e.code === "P2002" &&
+      typeof e.meta === "object" &&
+      e.meta !== null
+    ) {
+      // meta?.target is usually an array of fields that caused the uniqueness error
+      const meta = e.meta as { target?: string[] };
+      const field = meta.target?.[0] ?? "Field";
+      return `${field.charAt(0).toUpperCase() + field.slice(1)} already exists`;
+    }
+
+    // Handle a generic error with a message
+    if (typeof e.message === "string") {
+      return e.message;
+    }
+
+    // If .message is present but not a string, attempt JSON-stringifying
+    if ("message" in e) {
+      return JSON.stringify(e.message);
+    }
   }
- }
+
+  // fallback if it's not an object or has no message
+  return String(error);
+}
 
  // Round number to 2 decimal places
  export function round2(value: number | string) {
@@ -8692,203 +9250,141 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 </file>
 
-<file path="tailwind.config.ts">
-import type { Config } from "tailwindcss";
+<file path="app/(root)/page.tsx">
+import ProductList from '@/components/shared/product/product-list';
+import {
+  getLatestProducts,
+  getFeaturedProducts,
+} from '@/lib/actions/product.actions';
+import ProductCarousel from '@/components/shared/product/product-carousel';
+import ViewAllProductsButton from '@/components/view-all-products-button';
+import IconBoxes from '@/components/icon-boxes';
+import DealCountdown from '@/components/deal-countdown';
 
-export default {
-    darkMode: ["class"],
-    content: [
-    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
-  ],
-  theme: {
-  	extend: {
-  		colors: {
-  			background: 'hsl(var(--background))',
-  			foreground: 'hsl(var(--foreground))',
-  			card: {
-  				DEFAULT: 'hsl(var(--card))',
-  				foreground: 'hsl(var(--card-foreground))'
-  			},
-  			popover: {
-  				DEFAULT: 'hsl(var(--popover))',
-  				foreground: 'hsl(var(--popover-foreground))'
-  			},
-  			primary: {
-  				DEFAULT: 'hsl(var(--primary))',
-  				foreground: 'hsl(var(--primary-foreground))'
-  			},
-  			secondary: {
-  				DEFAULT: 'hsl(var(--secondary))',
-  				foreground: 'hsl(var(--secondary-foreground))'
-  			},
-  			muted: {
-  				DEFAULT: 'hsl(var(--muted))',
-  				foreground: 'hsl(var(--muted-foreground))'
-  			},
-  			accent: {
-  				DEFAULT: 'hsl(var(--accent))',
-  				foreground: 'hsl(var(--accent-foreground))'
-  			},
-  			destructive: {
-  				DEFAULT: 'hsl(var(--destructive))',
-  				foreground: 'hsl(var(--destructive-foreground))'
-  			},
-  			border: 'hsl(var(--border))',
-  			input: 'hsl(var(--input))',
-  			ring: 'hsl(var(--ring))',
-  			chart: {
-  				'1': 'hsl(var(--chart-1))',
-  				'2': 'hsl(var(--chart-2))',
-  				'3': 'hsl(var(--chart-3))',
-  				'4': 'hsl(var(--chart-4))',
-  				'5': 'hsl(var(--chart-5))'
-  			}
-  		},
-  		borderRadius: {
-  			lg: 'var(--radius)',
-  			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)'
-  		}
-  	}
-  },
-  plugins: [require("tailwindcss-animate")],
-} satisfies Config;
-</file>
+const Homepage = async () => { 
+  const latestProducts = await getLatestProducts();
+  const featuredProducts = await getFeaturedProducts();
 
-<file path="types/index.ts">
-import { z } from 'zod';
-import { 
-    insertProductSchema, 
-    insertCartSchema, 
-    cartItemSchema,
-    shippingAddressSchema,
-    insertOrderItemSchema,
-    insertOrderSchema,
-    paymentResultSchema
-}   from '@/lib/validators';
-
-export type Product = z.infer<typeof insertProductSchema> & {
-    id: string;
-    rating: string;
-    createdAt: Date;
-};
-
-export type Cart = z.infer<typeof insertCartSchema>;
-export type CartItem = z.infer<typeof cartItemSchema>;
-export type ShippingAddress = z.infer<typeof shippingAddressSchema>;
-export type OrderItem = z.infer<typeof insertOrderItemSchema>;
-export type Order = z.infer<typeof insertOrderSchema> & {
-  id: string;
-  createdAt: Date;
-  isPaid: boolean;
-  paidAt: Date | null;
-  isDelivered: boolean;
-  deliveredAt: Date | null;
-  orderitems: OrderItem[];
-  user: { name: string; email: string };
-};
-export type PaymentResult = z.infer<typeof paymentResultSchema>;
-</file>
-
-<file path="app/layout.tsx">
-import type { Metadata } from "next";
-// import { Geist, Geist_Mono } from "next/font/google";  (default)
-import { Inter } from "next/font/google";
-// import "./globals.css";                                (default, in the same folder)
-import "@/assets/styles/globals.css";
-import { APP_DESCRIPTION, APP_NAME, SERVER_URL } from '@/lib/constants';
-import { ThemeProvider } from "next-themes";
-import { Toaster } from '@/components/ui/sonner';
-
-const inter = Inter({subsets: ['latin']});
-
-export const metadata: Metadata = {
-  title: {
-    template: `%s | Prostore`,
-    default: APP_NAME,
-  },
-  description: APP_DESCRIPTION,
-  metadataBase: new URL(SERVER_URL)
-};
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-     // className={`${geistSans.variable} ${geistMono.variable} antialiased`} (default)
-        className={`${inter.className} antialiased`}>
-          <ThemeProvider
-            attribute='class'
-            defaultTheme="light"
-            enableSystem
-            disableTransitionOnChange
-          >
-            {children}
-            <Toaster />
-          </ThemeProvider>
-      </body>
-    </html>
+    <>
+      {featuredProducts.length > 0 && (
+        <ProductCarousel data={featuredProducts} />
+      )}
+      <ProductList data={latestProducts} title='Newest Arrivals' limit={4} />
+      <ViewAllProductsButton />
+      <DealCountdown />
+      <IconBoxes />
+    </>
   );
-}
+};
+
+export default Homepage;
 </file>
 
-<file path="lib/constants/index.ts">
-export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Prostore';
-export const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION || 'A modern ecommerce store built with Next.js';
-export const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000';
-export const LATEST_PRODUCTS_LIMIT = Number(process.env.LATEST_PRODUCTS_LIMIT) || 4;
+<file path="app/(root)/product/[slug]/page.tsx">
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card'
+import { getProductBySlug } from "@/lib/actions/product.actions";
+import { notFound } from "next/navigation";
+import ProductPrice from '@/components/shared/product/product-price';
+import ProductImages from '@/components/shared/product/product-images';
+import AddToCart from '@/components/shared/product/add-to-cart';
+import { getMyCart } from '@/lib/actions/cart.actions';
+import ReviewList from './review-list';
+import { auth } from '@/auth';
+import Rating from '@/components/shared/product/rating';
 
-export const signInDefaultValues = {
-    email: 'admin@example.com',
-    password: '123456',
+const ProductDetailsPage = async (props: {
+    params: Promise<{ slug: string }>;
+}) => {
+    const { slug } = await props.params;
+
+    const product = await getProductBySlug(slug);
+    if (!product) notFound();
+
+    const session = await auth();
+    const userId = session?.user?.id;
+
+    const cart = await getMyCart();
+
+    return <>
+        <section>
+
+            <div className="grid grid-cols-1 md:grid-cols-5">
+
+                {/* Images Column */}
+                <div className="col-span-2">
+                   <ProductImages images={product.images} /> 
+                </div>
+
+              <div className="col-span-2 p-5">
+
+                <div className="flex flex-col gap-6">
+                    <p>
+                        {product.brand} {product.category}
+                    </p>
+                    <h1 className="h3-bold">{product.name}</h1>
+                    <Rating value={Number(product.rating)} />
+                    <p>{product.numReviews} reviews</p>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <ProductPrice value={Number(product.price)} 
+                        className='w-24 rounded-full bg-green-100 text-green-700 px-5 py-2' />
+                    </div>
+                </div>
+                <div className="mt-10">
+                    <p className="font-semibold">Description</p>
+                    <p>{product.description}</p>
+                </div>
+              </div>  
+              {/* Action Column */}
+              <div>
+                <Card>
+                    <CardContent className="p-4">
+                        <div className="mb-2 flex justify-between">
+                            <div>Price</div>
+                            <div>
+                                <ProductPrice value={Number(product.price)} />
+                            </div>
+                        </div>
+                        <div className="mb-2 flex justify-between">
+                            <div>Status</div>
+                            {product.stock > 0 ? (
+                                <Badge variant='outline'>In Stock</Badge>
+                            ) : (
+                                <Badge variant='destructive'>Out Of Stock</Badge>
+                            )}
+                        </div>
+                        {product.stock > 0 && (
+                            <div className="flex-center">
+                                <AddToCart 
+                                cart={cart}
+                                item={{
+                                    productId: product.id,
+                                    name: product.name,
+                                    slug: product.slug,
+                                    price: product.price,
+                                    qty: 1,
+                                    image: product.images![0],
+                                }} />
+                            </div>
+                        ) }
+                    </CardContent>
+                </Card>
+              </div>
+            </div>
+        </section>
+        <section className='mt-10'>
+        <h2 className='h2-bold mb-5'>Customer Reviews</h2>
+        <ReviewList
+          userId={userId || ''}
+          productId={product.id}
+          productSlug={product.slug}
+        />
+      </section>
+    </>;
 };
-export const signUpDefaultValues = {
-    name: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-};
-
-export const shippingAddressDefaultValues = {
-    fullName: '',
-    streetAddress: '',
-    city: '',
-    postalCode: '',
-    country: '',
-};
-
-export const PAYMENT_METHODS = process.env.PAYMENT_METHODS
-  ? process.env.PAYMENT_METHODS.split(', ')
-  : ['PayPal', 'Stripe', 'CashOnDelivery'];
-export const DEFAULT_PAYMENT_METHOD =
-  process.env.DEFAULT_PAYMENT_METHOD || 'PayPal';
-
-  export const PAGE_SIZE = Number(process.env.PAGE_SIZE) || 12;
-
-  export const productDefaultValues = {
-    name: '',
-    slug: '',
-    category: '',
-    images: [],
-    brand: '',
-    description: '',
-    price: '0',
-    stock: '0',
-    rating: '0',
-    numReviews: '0',
-    isFeatured: false,
-    banner: null,
-  };
-
-  export const USER_ROLES = process.env.USER_ROLES
-  ? process.env.USER_ROLES.split(', ')
-  : ['admin', 'user'];
+ 
+export default ProductDetailsPage;
 </file>
 
 <file path="lib/validators.ts">
@@ -9021,6 +9517,19 @@ export const updateUserSchema = updateProfileSchema.extend({
   id: z.string().min(1, 'ID is required'),
   role: z.string().min(1, 'Role is required'),
 });
+
+// Schema to insert reviews
+export const insertReviewSchema = z.object({
+  title: z.string().min(3, 'Title must be at least 3 characters'),
+  description: z.string().min(3, 'Description must be at least 3 characters'),
+  productId: z.string().min(1, 'Product is required'),
+  userId: z.string().min(1, 'User is required'),
+  rating: z.coerce
+    .number()
+    .int()
+    .min(1, 'Rating must be at least 1')
+    .max(5, 'Rating must be at most 5'),
+});
 </file>
 
 <file path="prisma/schema.prisma">
@@ -9050,6 +9559,7 @@ model Product {
   banner        String?  
   createdAt     DateTime  @default(now()) @db.Timestamp(6)     
   OrderItem     OrderItem[] 
+  Review        Review[]
 }
 
 model User {
@@ -9068,6 +9578,7 @@ model User {
   session       Session[]
   Cart          Cart[]
   Order         Order[]
+  Review        Review[]
 }
 
 model Account {
@@ -9154,6 +9665,645 @@ model OrderItem {
 
   @@id([orderId, productId], map: "orderitems_orderId_productId_pk")
 }
+
+model Review {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String   @db.Uuid
+  productId          String   @db.Uuid
+  rating             Int
+  title              String
+  description        String
+  isVerifiedPurchase Boolean  @default(true)
+  createdAt          DateTime @default(now()) @db.Timestamp(6)
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+</file>
+
+<file path="app/(root)/order/[id]/order-details-table.tsx">
+'use client';
+  import { Badge } from '@/components/ui/badge';
+  import { Card, CardContent } from '@/components/ui/card';
+  import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+  } from '@/components/ui/table';
+  import { Button } from '@/components/ui/button';
+  import { formatCurrency, formatDateTime, formatId } from '@/lib/utils';
+  import { Order } from '@/types';
+  import Link from 'next/link';
+  import Image from 'next/image';
+  import { toast } from 'sonner';
+  import { useTransition } from 'react';
+  import {
+    PayPalButtons,
+    PayPalScriptProvider,
+    usePayPalScriptReducer,
+  } from '@paypal/react-paypal-js';
+  import {
+    createPayPalOrder,
+    approvePayPalOrder,
+    updateOrderToPaidCOD,
+    deliverOrder,
+  } from '@/lib/actions/order.actions';
+  import StripePayment from './stripe-payment';
+
+  // Define an interface for the response to add type safety
+  interface OrderActionResponse {
+    success: boolean;
+    message: string;
+    data?: unknown;
+  }
+
+  const OrderDetailsTable = ({ 
+    order, 
+    paypalClientId,
+    isAdmin,
+    stripeClientSecret,
+  }: { 
+    order: Omit<Order, 'paymentResult'>, 
+    paypalClientId: string;
+    isAdmin: boolean;
+    stripeClientSecret: string | null;
+  }) => {
+    const {
+      id,
+      shippingAddress,
+      orderitems,
+      itemsPrice,
+      shippingPrice,
+      taxPrice,
+      totalPrice,
+      paymentMethod,
+      isDelivered,
+      isPaid,
+      paidAt,
+      deliveredAt
+    } = order;
+
+
+    const PrintLoadingState = () => {
+      const [{ isPending, isRejected }] = usePayPalScriptReducer();
+      let status = '';
+    
+      if (isPending) {
+        status = 'Loading PayPal...';
+      } else if (isRejected) {
+        status = 'Error Loading PayPal';
+      }
+    
+      return status;
+    };
+
+    const handleCreatePayPalOrder = async (): Promise<string> => {
+      // Provide a default response if undefined
+      const res: OrderActionResponse = await createPayPalOrder(order.id) ?? {
+        success: false,
+        message: 'Failed to create PayPal order',
+        data: null
+      };
+    
+      if (!res.success) {
+        toast.error(res.message);
+        // Return some fallback string, or you can throw instead:
+        throw new Error('Could not create PayPal order');
+      }
+    
+      // The PayPalButtons component wants a string (the order ID).
+      // If you’re certain data is a string, cast it:
+      return res.data as string;
+    };
+
+    const handleApprovePayPalOrder = async (data: { orderID: string }) => {
+      // Provide a default response if undefined
+      const res: OrderActionResponse = await approvePayPalOrder(order.id, data) ?? {
+        success: false,
+        message: 'Failed to approve PayPal order',
+        data: null
+      };
+    
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    };
+
+      // Button to mark order as paid
+      const MarkAsPaidButton = () => {
+        const [isPending, startTransition] = useTransition();
+    
+        return (
+          <Button
+            type="button"
+            disabled={isPending}
+            onClick={() =>
+              startTransition(async () => {
+                const res = await updateOrderToPaidCOD(order.id);
+                if (res.success) {
+                  toast.success(res.message);
+                } else {
+                  toast.error(res.message);
+                }
+              })
+            }
+          >
+            {isPending ? "processing..." : "Mark As Paid"}
+          </Button>
+        );
+      };
+
+    // Button to mark order as delivered
+    const MarkAsDeliveredButton = () => {
+      const [isPending, startTransition] = useTransition();
+  
+      return (
+        <Button
+          type="button"
+          disabled={isPending}
+          onClick={() =>
+            startTransition(async () => {
+              const res = await deliverOrder(order.id);
+              if (res.success) {
+                toast.success(res.message);
+              } else {
+                toast.error(res.message);
+              }
+            })
+          }
+        >
+          {isPending ? "processing..." : "Mark As Delivered"}
+        </Button>
+      );
+    };
+    
+    
+    return (
+      <>
+        <h1 className='py-4 text-2xl'>Order {formatId(id)}</h1>
+        <div className="grid md:grid-cols-3 md:gap-5">
+          <div className="col-span-2 space-4-y overlow-x-auto">
+          <Card>
+              <CardContent className='p-4 gap-4'>
+                <h2 className='text-xl pb-4'>Payment Method</h2>
+                <p className='mb-2'>{paymentMethod}</p>
+                {isPaid ? (
+                  <Badge variant='secondary'>
+                    Paid at {formatDateTime(paidAt!).dateTime}
+                  </Badge>
+                ) : (
+                  <Badge variant='destructive'>Not paid</Badge>
+                )}
+              </CardContent>
+            </Card>
+            <Card className='my-2'>
+              <CardContent className='p-4 gap-4'>
+                <h2 className='text-xl pb-4'>Shipping Address</h2>
+                <p>{shippingAddress.fullName}</p>
+                <p className='mb-2'>
+                  {shippingAddress.streetAddress}, {shippingAddress.city}
+                  {shippingAddress.postalCode}, {shippingAddress.country}
+                </p>
+                {isDelivered ? (
+                  <Badge variant='secondary'>
+                    Delivered at {formatDateTime(deliveredAt!).dateTime}
+                  </Badge>
+                ) : (
+                  <Badge variant='destructive'>Not Delivered</Badge>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className='p-4 gap-4'>
+                <h2 className='text-xl pb-4'>Order Items</h2>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Quantity</TableHead>
+                      <TableHead>Price</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {orderitems.map((item) => (
+                      <TableRow key={item.slug}>
+                        <TableCell>
+                          <Link
+                            href={`/product/{item.slug}`}
+                            className='flex items-center'
+                          >
+                            <Image
+                              src={item.image}
+                              alt={item.name}
+                              width={50}
+                              height={50}
+                            />
+                            <span className='px-2'>{item.name}</span>
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <span className='px-2'>{item.qty}</span>
+                        </TableCell>
+                        <TableCell className='text-right'>
+                          ${item.price}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
+          <div>
+            <Card>
+              <CardContent className='p-4 gap-4 space-y-4'>
+                <div className='flex justify-between'>
+                  <div>Items</div>
+                  <div>{formatCurrency(itemsPrice)}</div>
+                </div>
+                <div className='flex justify-between'>
+                  <div>Tax</div>
+                  <div>{formatCurrency(taxPrice)}</div>
+                </div>
+                <div className='flex justify-between'>
+                  <div>Shipping</div>
+                  <div>{formatCurrency(shippingPrice)}</div>
+                </div>
+                <div className='flex justify-between'>
+                  <div>Total</div>
+                  <div>{formatCurrency(totalPrice)}</div>
+                </div>
+                  {/* PayPal Payment */}
+                  {!isPaid && paymentMethod === 'PayPal' && (
+                    <div>
+                      <PayPalScriptProvider options={{ clientId: paypalClientId }}>
+                        <PrintLoadingState />
+                        <PayPalButtons
+                          createOrder={handleCreatePayPalOrder}
+                          onApprove={handleApprovePayPalOrder}
+                        />
+                      </PayPalScriptProvider>
+                    </div>
+                  )}
+
+                  {/* Stripe Payment */}
+                  {!isPaid && paymentMethod === 'Stripe' && stripeClientSecret && (
+                    <StripePayment
+                      priceInCents={Number(order.totalPrice) * 100}
+                      orderId={order.id}
+                      clientSecret={stripeClientSecret}
+                    />
+                  )}
+
+                  {/* Cash On Delivery */}
+                  {isAdmin && !isPaid && paymentMethod === 'CashOnDelivery' && (
+                    <MarkAsPaidButton />
+                  )}
+                  {isAdmin && isPaid && !isDelivered && <MarkAsDeliveredButton />}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </>
+    );
+  };
+
+
+  export default OrderDetailsTable;
+</file>
+
+<file path="app/(root)/product/[slug]/review-list.tsx">
+'use client';
+
+import { useEffect } from 'react';
+import { Review } from '@/types';
+import Link from 'next/link';
+import { useState } from 'react';
+import ReviewForm from './review-form';
+import { getReviews } from '@/lib/actions/review.actions';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Calendar, User } from 'lucide-react';
+import { formatDateTime } from '@/lib/utils';
+import Rating from '@/components/shared/product/rating';
+
+const ReviewList = ({
+  userId,
+  productId,
+  productSlug,
+}: {
+  userId: string;
+  productId: string;
+  productSlug: string;
+}) => {
+  const [reviews, setReviews ] = useState<Review[]>([]);
+
+  useEffect(() => {
+    const loadReviews = async () => {
+      const res = await getReviews({ productId });
+      setReviews(res.data);
+    };
+
+    loadReviews();
+  }, [productId]);
+
+  // Reload reviews after created or updated
+  const reload = async () => {
+    const res = await getReviews({ productId });
+    setReviews([...res.data]);
+  };
+
+  return (
+    <div className='space-y-4'>
+      {reviews.length === 0 && <div>No reviews yet</div>}
+      {userId ? (
+        <ReviewForm
+          userId={userId}
+          productId={productId}
+          onReviewSubmitted={reload}
+        />
+      ) : (
+        <div>
+          Please
+          <Link
+            className='text-blue-700 px-2'
+            href={`/sign-in?callbackUrl=/product/${productSlug}`}
+          >
+            sign in
+          </Link>
+          to write a review
+        </div>
+      )}
+      <div className='flex flex-col gap-3'>
+        {reviews.map((review) => (
+          <Card key={review.id}>
+            <CardHeader>
+              <div className='flex-between'>
+                <CardTitle>{review.title}</CardTitle>
+              </div>
+              <CardDescription>{review.description}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className='flex space-x-4 text-sm text-muted-foreground'>
+                <Rating value={review.rating} />
+                <div className='flex items-center'>
+                  <User className='mr-1 h-3 w-3' />
+                  {review.user ? review.user.name : 'User'}
+                </div>
+                <div className='flex items-center'>
+                  <Calendar className='mr-1 h-3 w-3' />
+                  {formatDateTime(review.createdAt).dateTime}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default ReviewList;
+</file>
+
+<file path="db/sample-data.ts">
+import { hashSync } from 'bcrypt-ts-edge';
+
+const sampleData = {
+  users: [
+    {
+      name: 'John',
+      email: 'admin@example.com',
+      password: hashSync('123456', 10),
+      role: 'admin'
+    },
+    {
+      name: 'Jane',
+      email: 'user@example.com',
+      password: hashSync('123456', 10),
+      role: 'user'
+    },
+  ],
+  products: [
+    {
+      name: 'HUGO BOSS Poloshirt til Drenge Strågul',
+      slug: 'boss-polo-shirt-yellow',
+      category: "Herreskjorter",
+      description: 'Poloens ikoniske stil kombineret med ny tids komfort',
+      images: [
+        '/images/sample-products/p1-1.jpg',
+        '/images/sample-products/p1-2.jpg',
+      ],
+      price: 59.99,
+      brand: 'HUGO BOSS',
+      rating: 4.5,
+      numReviews: 10,
+      stock: 5,
+      isFeatured: true,
+      banner: '/images/sample-products/banner-1.jpg',
+    },
+    {
+      name: 'Lyle And Scott Oxford Skjorte X41 Riviera',
+      slug: 'lyle-and-scott-oxford-riviera',
+      category: "Herreskjorter",
+      description: 'Klassisk design kombineret med luksuriøs komfort',
+      images: [
+        '/images/sample-products/p2-1.jpg',
+        '/images/sample-products/p2-2.jpg',
+      ],
+      price: 85.9,
+      brand: 'Lyle And Scott',
+      rating: 4.2,
+      numReviews: 8,
+      stock: 10,
+      isFeatured: true,
+      banner: '/images/sample-products/banner-2.jpg',
+    },
+    {
+      name: 'ONLY & SONS Herre Caiden Life Langærmet shirts beige',
+      slug: 'only-sons-caiden-life-shirt-beige',
+      category: "Herreskjorter",
+      description: 'En ideel kombination af elegance og komfort',
+      images: [
+        '/images/sample-products/p3-1.jpg',
+        '/images/sample-products/p3-2.jpg',
+      ],
+      price: 99.95,
+      brand: 'ONLY & SONS',
+      rating: 4.9,
+      numReviews: 3,
+      stock: 0,
+      isFeatured: false,
+      banner: null,
+    },
+    {
+      name: 'ONLY & SONS Herre Caiden Life Langærmet shirts Blå',
+      slug: 'only-sons-caiden-life-shirt-blue',
+      category: "Herreskjorter",
+      description: 'Enkel og moderne stil i fleksibelt tekstil',
+      images: [
+        '/images/sample-products/p4-1.jpg',
+        '/images/sample-products/p4-2.jpg',
+      ],
+      price: 39.95,
+      brand: 'ONLY & SONS',
+      rating: 3.6,
+      numReviews: 5,
+      stock: 10,
+      isFeatured: false,
+      banner: null,
+    },
+    {
+      name: 'Indicode Polo Shirt',
+      slug: 'polo-indicode-shirt',
+      category: "Herreskjorter",
+      description: 'Tidløst polodesign med et raffineret udtryk',
+      images: [
+        '/images/sample-products/p5-1.jpg',
+        '/images/sample-products/p5-2.jpg',
+      ],
+      price: 79.99,
+      brand: 'Indicode',
+      rating: 4.7,
+      numReviews: 18,
+      stock: 6,
+      isFeatured: false,
+      banner: null,
+    },
+    {
+      name: 'Han KJØBENHAVN Hoodie',
+      slug: 'han-cph-hoodie',
+      category: "Herre Sweatshirts",
+      description: 'Behagelig, moderigtig og perfekt til afslappede dage',
+      images: [
+        '/images/sample-products/p6-1.jpg',
+        '/images/sample-products/p6-2.jpg',
+      ],
+      price: 99.99,
+      brand: 'Han KJØBENHAVN',
+      rating: 4.6,
+      numReviews: 12,
+      stock: 8,
+      isFeatured: false,
+      banner: null,
+    },
+  ],
+};
+
+export default sampleData;
+</file>
+
+<file path="lib/constants/index.ts">
+export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Prostore';
+export const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION || 'A modern ecommerce store built with Next.js';
+export const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000';
+export const LATEST_PRODUCTS_LIMIT = Number(process.env.LATEST_PRODUCTS_LIMIT) || 4;
+
+export const signInDefaultValues = {
+    email: 'admin@example.com',
+    password: '123456',
+};
+export const signUpDefaultValues = {
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+};
+
+export const shippingAddressDefaultValues = {
+    fullName: '',
+    streetAddress: '',
+    city: '',
+    postalCode: '',
+    country: '',
+};
+
+export const PAYMENT_METHODS = process.env.PAYMENT_METHODS
+  ? process.env.PAYMENT_METHODS.split(', ')
+  : ['PayPal', 'Stripe', 'CashOnDelivery'];
+export const DEFAULT_PAYMENT_METHOD =
+  process.env.DEFAULT_PAYMENT_METHOD || 'PayPal';
+
+  export const PAGE_SIZE = Number(process.env.PAGE_SIZE) || 12;
+
+  export const productDefaultValues = {
+    name: '',
+    slug: '',
+    category: '',
+    images: [],
+    brand: '',
+    description: '',
+    price: '0',
+    stock: '0',
+    rating: '0',
+    numReviews: '0',
+    isFeatured: false,
+    banner: null,
+  };
+
+  export const USER_ROLES = process.env.USER_ROLES
+  ? process.env.USER_ROLES.split(', ')
+  : ['admin', 'user'];
+
+  export const reviewFormDefaultValues = {
+    title: '',
+    comment: '',
+    rating: 0,
+  };
+
+  export const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev';
+</file>
+
+<file path="types/index.ts">
+import { z } from 'zod';
+import { 
+    insertProductSchema, 
+    insertCartSchema, 
+    cartItemSchema,
+    shippingAddressSchema,
+    insertOrderItemSchema,
+    insertOrderSchema,
+    paymentResultSchema,
+    insertReviewSchema,
+}   from '@/lib/validators';
+
+export type Product = z.infer<typeof insertProductSchema> & {
+    id: string;
+    rating: string;
+    numReviews: number;
+    createdAt: Date;
+};
+
+export type Cart = z.infer<typeof insertCartSchema>;
+export type CartItem = z.infer<typeof cartItemSchema>;
+export type ShippingAddress = z.infer<typeof shippingAddressSchema>;
+export type OrderItem = z.infer<typeof insertOrderItemSchema>;
+export type Order = z.infer<typeof insertOrderSchema> & {
+  id: string;
+  createdAt: Date;
+  isPaid: boolean;
+  paidAt: Date | null;
+  isDelivered: boolean;
+  deliveredAt: Date | null;
+  orderitems: OrderItem[];
+  user: { name: string; email: string };
+  paymentResult: PaymentResult;
+};
+export type PaymentResult = z.infer<typeof paymentResultSchema>;
+export type Review = z.infer<typeof insertReviewSchema> & {
+  id: string;
+  createdAt: Date;
+  user?: { name: string };
+};
 </file>
 
 <file path="package.json">
@@ -9168,7 +10318,8 @@ model OrderItem {
     "lint": "next lint",
     "postinstall": "prisma generate",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "email": "copyfiles .env ./node_modules/react-email && email dev --dir email --port 3001"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.8.0",
@@ -9184,6 +10335,9 @@ model OrderItem {
     "@radix-ui/react-radio-group": "^1.2.3",
     "@radix-ui/react-select": "^2.1.6",
     "@radix-ui/react-slot": "^1.1.2",
+    "@react-email/components": "^0.0.36",
+    "@stripe/react-stripe-js": "^3.6.0",
+    "@stripe/stripe-js": "^7.0.0",
     "@uploadthing/react": "^7.1.2",
     "bcrypt-ts-edge": "^3.0.1",
     "class-variance-authority": "^0.7.1",
@@ -9195,12 +10349,15 @@ model OrderItem {
     "next-auth": "^5.0.0-beta.25",
     "next-themes": "^0.4.5",
     "query-string": "^9.1.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-email": "^4.0.4",
     "react-hook-form": "^7.54.2",
     "recharts": "^2.15.1",
+    "resend": "^4.2.0",
     "slugify": "^1.6.6",
     "sonner": "^2.0.1",
+    "stripe": "^18.0.0",
     "tailwind-merge": "^3.0.2",
     "tailwindcss-animate": "^1.0.7",
     "uploadthing": "^7.4.0",
@@ -9217,6 +10374,7 @@ model OrderItem {
     "@types/react-dom": "^19",
     "@types/ws": "^8.5.14",
     "bufferutil": "^4.0.9",
+    "copyfiles": "^2.4.1",
     "dotenv": "^16.4.7",
     "eslint": "^9",
     "eslint-config-next": "15.1.7",

@@ -20,10 +20,10 @@ const CartTable = ({ cart }: { cart?: Cart }) => {
     
     return (
         <>
-            <h1 className='py-4 h2-bold'>Shopping Cart</h1>
+            <h1 className='py-4 h2-bold'>Indkøbskurv</h1>
             {!cart || cart.items.length === 0 ? (
                 <div>
-                    Cart is empty. <Link href='/'>Go Shopping</Link>
+                    Kurv er tom. <Link href='/'>Læg i kurv</Link>
                 </div>
             ) : (
                 <div className='grid md:grid-cols-4 md:gap-5'>
@@ -31,9 +31,9 @@ const CartTable = ({ cart }: { cart?: Cart }) => {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Item</TableHead>
-                                <TableHead className='text-center'>Quantity</TableHead>
-                                <TableHead className='text-right'>Price</TableHead>
+                                <TableHead>Produkt</TableHead>
+                                <TableHead className='text-center'>Kvantitet</TableHead>
+                                <TableHead className='text-right'>Pris</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -54,7 +54,7 @@ const CartTable = ({ cart }: { cart?: Cart }) => {
                                                     // Updated toast usage for Sonner
                                                     toast.error(res.message);
                                                 } else {
-                                                    toast.success('Item removed from cart');
+                                                    toast.success('Produkt er fjernet fra kurv');
                                                     router.refresh(); // Force UI to update
                                                 }
                                                 
@@ -75,7 +75,7 @@ const CartTable = ({ cart }: { cart?: Cart }) => {
                                                     // Updated toast usage for Sonner
                                                     toast.error(res.message);
                                                 } else {
-                                                    toast.success('Item added to cart');
+                                                    toast.success('Produkt tilføjet til kurv');
                                                     router.refresh(); // Force UI to update
                                                 }
                                                 
@@ -88,7 +88,7 @@ const CartTable = ({ cart }: { cart?: Cart }) => {
                                         )}
                                         </Button>
                                     </TableCell>
-                                    <TableCell className='text-right'>${item.price}</TableCell>
+                                    <TableCell className='text-right'>{formatCurrency(item.price)}</TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>
@@ -98,7 +98,7 @@ const CartTable = ({ cart }: { cart?: Cart }) => {
                     <Card>
                         <CardContent className='p-4 gap-4'>
                             <div className='pb-3 text-xl'>
-                                Subtotal ({cart.items.reduce((a, c) => a + c.qty, 0)}):
+                                Total ({cart.items.reduce((a, c) => a + c.qty, 0)}):
                                 <span className='font-bold'>
                                     {formatCurrency(cart.itemsPrice)}
                                 </span>
@@ -115,7 +115,7 @@ const CartTable = ({ cart }: { cart?: Cart }) => {
                                 ) : (
                                     <ArrowRight className='w-4 h-4' />
                                 )}{' '}
-                                Proceed to Checkout
+                                Gå til kassen
                             </Button>
                         </CardContent>
                     </Card>

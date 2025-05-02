@@ -7,31 +7,21 @@ import {
 import Link from 'next/link';
 
 const prices = [
-  {
-    name: '$1 to $50',
-    value: '1-50',
-  },
-  {
-    name: '$51 to $100',
-    value: '51-100',
-  },
-  {
-    name: '$101 to $200',
-    value: '101-200',
-  },
-  {
-    name: '$201 to $500',
-    value: '201-500',
-  },
-  {
-    name: '$501 to $1000',
-    value: '501-1000',
-  },
+  { name: '0–499 kr', value: '0-499' },
+  { name: '500–999 kr', value: '500-999' },
+  { name: '1000–1999 kr', value: '1000-1999' },
+  { name: '2000–4999 kr', value: '2000-4999' },
+  { name: '5000+ kr', value: '5000-' },
 ];
 
 const ratings = [4, 3, 2, 1];
 
-const sortOrders = ['newest', 'lowest', 'highest', 'rating'];
+const sortOrders = [
+  { value: 'newest', label: 'Nyeste' },
+  { value: 'lowest', label: 'Laveste pris' },
+  { value: 'highest', label: 'Højeste pris' },
+  { value: 'rating', label: 'Bedømmelse' },
+];
 
 export async function generateMetadata(props: {
   searchParams: Promise<{
@@ -57,14 +47,14 @@ export async function generateMetadata(props: {
   if (isQuerySet || isCategorySet || isPriceSet || isRatingSet) {
     return {
       title: `
-      Search ${isQuerySet ? q : ''} 
-      ${isCategorySet ? `: Category ${category}` : ''}
-      ${isPriceSet ? `: Price ${price}` : ''}
-      ${isRatingSet ? `: Rating ${rating}` : ''}`,
+      Søg ${isQuerySet ? q : ''} 
+      ${isCategorySet ? `: Afdeling ${category}` : ''}
+      ${isPriceSet ? `: Pris ${price}` : ''}
+      ${isRatingSet ? `: Bedømmelse ${rating}` : ''}`,
     };
   } else {
     return {
-      title: 'Search Products',
+      title: 'Søg produkter',
     };
   }
 }
@@ -128,7 +118,7 @@ const SearchPage = async (props: {
     <div className='grid md:grid-cols-5 md:gap-5'>
       <div className='filter-links'>
         {/* Category Links */}
-        <div className='text-xl mb-2 mt-3'>Department</div>
+        <div className='text-xl mb-2 mt-3'>Afdeling</div>
         <div>
           <ul className='space-y-1'>
             <li>
@@ -138,7 +128,7 @@ const SearchPage = async (props: {
                 }`}
                 href={getFilterUrl({ c: 'all' })}
               >
-                Any
+                Alle
               </Link>
             </li>
             {categories.map((x) => (
@@ -154,7 +144,7 @@ const SearchPage = async (props: {
           </ul>
         </div>
         {/* Price Links */}
-        <div className='text-xl mb-2 mt-8'>Price</div>
+        <div className='text-xl mb-2 mt-8'>Pris</div>
         <div>
           <ul className='space-y-1'>
             <li>
@@ -162,7 +152,7 @@ const SearchPage = async (props: {
                 className={`${price === 'all' && 'font-bold'}`}
                 href={getFilterUrl({ p: 'all' })}
               >
-                Any
+                Alle
               </Link>
             </li>
             {prices.map((p) => (
@@ -178,7 +168,7 @@ const SearchPage = async (props: {
           </ul>
         </div>
         {/* Rating Links */}
-        <div className='text-xl mb-2 mt-8'>Customer Ratings</div>
+        <div className='text-xl mb-2 mt-8'>Bedømmelser</div>
         <div>
           <ul className='space-y-1'>
             <li>
@@ -186,7 +176,7 @@ const SearchPage = async (props: {
                 className={`${rating === 'all' && 'font-bold'}`}
                 href={getFilterUrl({ r: 'all' })}
               >
-                Any
+                Alle
               </Link>
             </li>
             {ratings.map((r) => (
@@ -195,7 +185,7 @@ const SearchPage = async (props: {
                   className={`${rating === r.toString() && 'font-bold'}`}
                   href={getFilterUrl({ r: `${r}` })}
                 >
-                  {`${r} stars & up`}
+                  {`${r} stjerner og derover`}
                 </Link>
               </li>
             ))}
@@ -205,35 +195,31 @@ const SearchPage = async (props: {
       <div className='md:col-span-4 space-y-4'>
         <div className='flex-between flex-col md:flex-row my-4'>
           <div className='flex items-center'>
-            {q !== 'all' && q !== '' && 'Query: ' + q}
-            {category !== 'all' && category !== '' && 'Category: ' + category}
-            {price !== 'all' && ' Price: ' + price}
-            {rating !== 'all' && ' Rating: ' + rating + ' stars & up'}
+            {q !== 'all' && q !== '' && 'Forespørgsel: ' + q}
+            {category !== 'all' && category !== '' && 'Afdeling: ' + category}
+            {price !== 'all' && ' Pris: ' + price}
+            {rating !== 'all' && ' Bedømmelse: ' + rating + ' stars & up'}
             &nbsp;
             {(q !== 'all' && q !== '') ||
             (category !== 'all' && category !== '') ||
             rating !== 'all' ||
             price !== 'all' ? (
               <Button variant={'link'} asChild>
-                <Link href='/search'>Clear</Link>
+                <Link href='/search'>Ryd</Link>
               </Button>
             ) : null}
           </div>
           <div>
-            Sort by{' '}
+            Sortér efter{' '}
             {sortOrders.map((s) => (
-              <Link
-                key={s}
-                className={`mx-2 ${sort == s && 'font-bold'}`}
-                href={getFilterUrl({ s })}
-              >
-                {s}
+              <Link key={s.value} className={`mx-2 ${sort === s.value && 'font-bold'}`} href={getFilterUrl({ s: s.value })}>
+                {s.label}
               </Link>
             ))}
           </div>
         </div>
         <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
-          {products.data.length === 0 && <div>No products found</div>}
+          {products.data.length === 0 && <div>Ingen produkter fundet</div>}
           {products.data.map((product) => (
             <ProductCard key={product.id} product={product} />
           ))}

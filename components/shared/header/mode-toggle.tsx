@@ -39,16 +39,16 @@ const ModeToggle = () => {
             </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
-            <DropdownMenuLabel>Apperance</DropdownMenuLabel>
+            <DropdownMenuLabel>Udseende</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuCheckboxItem checked={theme === 'system'} onClick={ () => setTheme ('system') }>
-                System
+                Efter Enhed
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={theme === 'dark'} onClick={ () => setTheme ('dark') }>
-                Dark
+                Mørkt
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={theme === 'light'} onClick={ () => setTheme ('light') }>
-                Light
+                Lyst
             </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
     </DropdownMenu>

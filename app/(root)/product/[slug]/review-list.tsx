@@ -45,7 +45,7 @@ const ReviewList = ({
 
   return (
     <div className='space-y-4'>
-      {reviews.length === 0 && <div>No reviews yet</div>}
+      {reviews.length === 0 && <div>Ingen anmeldelser endnu</div>}
       {userId ? (
         <ReviewForm
           userId={userId}
@@ -59,9 +59,9 @@ const ReviewList = ({
             className='text-blue-700 px-2'
             href={`/sign-in?callbackUrl=/product/${productSlug}`}
           >
-            sign in
+            log in
           </Link>
-          to write a review
+          for at skrive en anmeldelse
         </div>
       )}
       <div className='flex flex-col gap-3'>
