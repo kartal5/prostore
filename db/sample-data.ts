@@ -17,7 +17,7 @@ const sampleData = {
   ],
   products: [
     {
-      name: 'Poloshirt til Drenge Strågul',
+      name: 'HUGO BOSS Poloshirt til Drenge Strågul',
       slug: 'boss-polo-shirt-yellow',
       category: "Herreskjorter",
       description: 'Poloens ikoniske stil kombineret med ny tids komfort',
@@ -26,7 +26,7 @@ const sampleData = {
         '/images/sample-products/p1-2.jpg',
       ],
       price: 59.99,
-      brand: 'BOSS',
+      brand: 'HUGO BOSS',
       rating: 4.5,
       numReviews: 10,
       stock: 5,
@@ -34,7 +34,7 @@ const sampleData = {
       banner: '/images/sample-products/banner-1.jpg',
     },
     {
-      name: 'Drengenes Oxford Skjorte X41 Riviera',
+      name: 'Lyle And Scott Oxford Skjorte X41 Riviera',
       slug: 'lyle-and-scott-oxford-riviera',
       category: "Herreskjorter",
       description: 'Klassisk design kombineret med luksuriøs komfort',
@@ -51,7 +51,7 @@ const sampleData = {
       banner: '/images/sample-products/banner-2.jpg',
     },
     {
-      name: 'Herre Caiden Life Langærmet shirts beige',
+      name: 'ONLY & SONS Herre Caiden Life Langærmet shirts beige',
       slug: 'only-sons-caiden-life-shirt-beige',
       category: "Herreskjorter",
       description: 'En ideel kombination af elegance og komfort',
@@ -68,7 +68,7 @@ const sampleData = {
       banner: null,
     },
     {
-      name: 'Herre Caiden Life Langærmet shirts Blå',
+      name: 'ONLY & SONS Herre Caiden Life Langærmet shirts Blå',
       slug: 'only-sons-caiden-life-shirt-blue',
       category: "Herreskjorter",
       description: 'Enkel og moderne stil i fleksibelt tekstil',
@@ -85,7 +85,7 @@ const sampleData = {
       banner: null,
     },
     {
-      name: 'Polo Indicode Shirt',
+      name: 'Indicode Polo Shirt',
       slug: 'polo-indicode-shirt',
       category: "Herreskjorter",
       description: 'Tidløst polodesign med et raffineret udtryk',
