@@ -68,9 +68,9 @@
       let status = '';
     
       if (isPending) {
-        status = 'Loading PayPal...';
+        status = 'Indlæser PayPal…';
       } else if (isRejected) {
-        status = 'Error Loading PayPal';
+        status = 'Fejl ved indlæsning af PayPal';
       }
     
       return status;
@@ -80,14 +80,14 @@
       // Provide a default response if undefined
       const res: OrderActionResponse = await createPayPalOrder(order.id) ?? {
         success: false,
-        message: 'Failed to create PayPal order',
+        message: 'Kunne ikke oprette PayPal-ordre',
         data: null
       };
     
       if (!res.success) {
         toast.error(res.message);
         // Return some fallback string, or you can throw instead:
-        throw new Error('Could not create PayPal order');
+        throw new Error('Kunne ikke oprette PayPal ordren');
       }
     
       // The PayPalButtons component wants a string (the order ID).
@@ -99,7 +99,7 @@
       // Provide a default response if undefined
       const res: OrderActionResponse = await approvePayPalOrder(order.id, data) ?? {
         success: false,
-        message: 'Failed to approve PayPal order',
+        message: 'Kunne ikke godkende PayPal-ordre',
         data: null
       };
     
@@ -129,7 +129,7 @@
               })
             }
           >
-            {isPending ? "processing..." : "Mark As Paid"}
+            {isPending ? "behandler..." : "Markér som betalt"}
           </Button>
         );
       };
@@ -153,7 +153,7 @@
             })
           }
         >
-          {isPending ? "processing..." : "Mark As Delivered"}
+          {isPending ? "behandler…" : "Markér som leveret"}
         </Button>
       );
     };
@@ -166,20 +166,20 @@
           <div className="col-span-2 space-4-y overlow-x-auto">
           <Card>
               <CardContent className='p-4 gap-4'>
-                <h2 className='text-xl pb-4'>Payment Method</h2>
+                <h2 className='text-xl pb-4'>Betalingsmetode</h2>
                 <p className='mb-2'>{paymentMethod}</p>
                 {isPaid ? (
                   <Badge variant='secondary'>
                     Paid at {formatDateTime(paidAt!).dateTime}
                   </Badge>
                 ) : (
-                  <Badge variant='destructive'>Not paid</Badge>
+                  <Badge variant='destructive'>Ikke betalt</Badge>
                 )}
               </CardContent>
             </Card>
             <Card className='my-2'>
               <CardContent className='p-4 gap-4'>
-                <h2 className='text-xl pb-4'>Shipping Address</h2>
+                <h2 className='text-xl pb-4'>Leveringsadresse</h2>
                 <p>{shippingAddress.fullName}</p>
                 <p className='mb-2'>
                   {shippingAddress.streetAddress}, {shippingAddress.city}
@@ -190,19 +190,19 @@
                     Delivered at {formatDateTime(deliveredAt!).dateTime}
                   </Badge>
                 ) : (
-                  <Badge variant='destructive'>Not Delivered</Badge>
+                  <Badge variant='destructive'>Ikke leveret</Badge>
                 )}
               </CardContent>
             </Card>
             <Card>
               <CardContent className='p-4 gap-4'>
-                <h2 className='text-xl pb-4'>Order Items</h2>
+                <h2 className='text-xl pb-4'>Ordreoversigt</h2>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Price</TableHead>
+                      <TableHead>Produkt</TableHead>
+                      <TableHead>Antal</TableHead>
+                      <TableHead>Pris</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -237,19 +237,19 @@
             <Card>
               <CardContent className='p-4 gap-4 space-y-4'>
                 <div className='flex justify-between'>
-                  <div>Items</div>
+                  <div>Varer</div>
                   <div>{formatCurrency(itemsPrice)}</div>
                 </div>
                 <div className='flex justify-between'>
-                  <div>Tax</div>
+                  <div>Moms</div>
                   <div>{formatCurrency(taxPrice)}</div>
                 </div>
                 <div className='flex justify-between'>
-                  <div>Shipping</div>
+                  <div>Forsendelse</div>
                   <div>{formatCurrency(shippingPrice)}</div>
                 </div>
                 <div className='flex justify-between'>
-                  <div>Total</div>
+                  <div>Samlet</div>
                   <div>{formatCurrency(totalPrice)}</div>
                 </div>
                   {/* PayPal Payment */}
