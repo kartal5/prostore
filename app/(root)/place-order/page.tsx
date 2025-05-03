@@ -22,7 +22,7 @@ import { auth } from '@/auth';
 
 
 export const metadata: Metadata = {
-  title: 'Place Order',
+  title: 'Gennemfør ordre',
 };
 
 const PlaceOrderPage = async () => {
@@ -43,12 +43,12 @@ const PlaceOrderPage = async () => {
   
     return <>
         <CheckoutSteps current={3} />
-        <h1 className='py-4 text-2xl'>Place Order</h1>
+        <h1 className='py-4 text-2xl'>Gennemfør ordre</h1>
         <div className="grid md:grid-cols-3 md:gap-5">
             <div className='md:col-span-2 overflow-x-auto space-y-4'>
                 <Card>
                     <CardContent className='p-4 gap-4'>
-                        <h2 className='text-xl pb-4'>Shipping Address</h2>
+                        <h2 className='text-xl pb-4'>Leveringsadresse</h2>
                         <p>{userAddress.fullName}</p>
                         <p>
                             {userAddress.streetAddress}, {userAddress.city}{' '}
@@ -56,7 +56,7 @@ const PlaceOrderPage = async () => {
                         </p>
                         <div className='mt-3'>
                             <Link href='/shipping-address'>
-                                <Button variant='outline'>Edit</Button>
+                                <Button variant='outline'>Rediger</Button>
                             </Link>
                         </div>
                     </CardContent>
@@ -64,11 +64,11 @@ const PlaceOrderPage = async () => {
 
                 <Card>
                     <CardContent className='p-4 gap-4'>
-                        <h2 className='text-xl pb-4'>Payment Method</h2>
+                        <h2 className='text-xl pb-4'>Betalingsmetode</h2>
                         <p>{user.paymentMethod}</p>
                         <div className='mt-3'>
                             <Link href='/payment-method'>
-                                <Button variant='outline'>Edit</Button>
+                                <Button variant='outline'>Rediger</Button>
                             </Link>
                         </div>
                     </CardContent>
@@ -76,13 +76,13 @@ const PlaceOrderPage = async () => {
 
                 <Card>
                     <CardContent className='p-4 gap-4'>
-                        <h2 className='text-xl pb-4'>Order Items</h2>
+                        <h2 className='text-xl pb-4'>Ordreoversigt</h2>
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Item</TableHead>
-                                    <TableHead>Quantity</TableHead>
-                                    <TableHead>Price</TableHead>
+                                    <TableHead>Produkt</TableHead>
+                                    <TableHead>Antal</TableHead>
+                                    <TableHead>Pris</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -115,19 +115,19 @@ const PlaceOrderPage = async () => {
                 <Card>
                     <CardContent className='p-4 gap-4 space-y-4'>
                     <div className='flex justify-between'>
-                        <div>Items</div>
+                        <div>Varer</div>
                         <div>{formatCurrency(cart.itemsPrice)}</div>
                     </div>
                         <div className='flex justify-between'>
-                        <div>Tax</div>
+                        <div>Moms</div>
                         <div>{formatCurrency(cart.taxPrice)}</div>
                     </div>
                         <div className='flex justify-between'>
-                        <div>Shipping</div>
+                        <div>Forsendelse</div>
                         <div>{formatCurrency(cart.shippingPrice)}</div>
                     </div>
                         <div className='flex justify-between'>
-                        <div>Total</div>
+                        <div>Samlet</div>
                         <div>{formatCurrency(cart.totalPrice)}</div>
                     </div>
                      <PlaceOrderForm />

@@ -48,8 +48,8 @@ const PaymentMethodForm = ({
   return (
     <>
       <div className="max-w-md mx-auto space-y-4">
-        <h1 className="h2-bold mt-4">Payment Method</h1>
-        <p className="text-sm text-muted-foreground">Please select a payment method</p>
+        <h1 className="h2-bold mt-4">Betalingsmetode</h1>
+        <p className="text-sm text-muted-foreground">Vælg venligst en betalingsmetode</p>
         <Form {...form}>
           <form method="post" className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
           <div className='flex flex-col md:flex-row gap-5'>
@@ -89,7 +89,7 @@ const PaymentMethodForm = ({
                     ) : (
                         <ArrowRight className='w-4 h-4' />
                     )}{' '}
-                    Continue
+                    Fortsæt
                 </Button>
             </div>
           </form>

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 const CheckoutSteps = ({ current = 0 }) => {
   return (
     <div className="flex-between flex-col md:flex-row space-x-2 space-y-2 mb-10">
-      {['User Login', 'Shipping Address', 'Payment Method', 'Place Order'].map((step, index) => (
+      {['Brugerlogin', 'Leveringsadresse', 'Betalingsmetode', 'Bekræft ordre'].map((step, index) => (
         <React.Fragment key={step}>
             <div className={cn('p-2 w-56 rounded-full text-center text-sm', index === current ? 'bg-secondary' : ''
 
