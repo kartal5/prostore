@@ -34,8 +34,12 @@ export async function addItemToCart(data: CartItem) {
 
         // Get session and user ID
         const session = await auth();
-        const userId = session?.user?.id ? (session.user.id as string) : undefined;
-
+        const candidateUserId = session?.user?.id as string | undefined;
+        // verify the user still exists (in case DB was reset)
+        const validUser = candidateUserId
+            ? await prisma.user.findUnique({ where: { id: candidateUserId } })
+            : null;
+            const userId = validUser ? validUser.id : undefined;   // undefined → column omitted
         
 
         // Get cart
