@@ -15,11 +15,7 @@ export function convertToPlainObject<T>(value: T): T {
  * Format a number to always show two decimal places (Danish style uses comma as decimal separator).
  */
 export function formatNumberWithDecimal(num: number): string {
-  const formatter = new Intl.NumberFormat('da-DK', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return formatter.format(num);
+  return num.toFixed(2);
 }
 
 // Format error 
