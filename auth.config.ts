@@ -19,11 +19,7 @@ export const authConfig = {
         error: '/sign-in',  // Redirect users here if sign-in fails (or other auth errors)
     },
     callbacks: {
-        /**
-         * The 'authorized' callback is crucial for middleware.
-         * It runs before a request is completed on paths defined in middleware.ts's matcher.
-         * Use it to protect routes and handle other request-level checks.
-         */
+        // 'authorized' runs pre-request on matched paths to protect routes and validate access.
         authorized({ auth, request }) {
             const isLoggedIn = !!auth?.user; // Check if the user session exists
             const { pathname } = request.nextUrl; // Get the path the user is trying to access
@@ -50,10 +46,9 @@ export const authConfig = {
                 return NextResponse.redirect(signInUrl); // Redirect to the sign-in page immediately
             }
 
-            // If the path is not protected, or if the user is logged in,
-            // return true (allow access) or the response object (if a cookie was set).
+            // Allow access if path is unprotected or user is logged in; return response if cookies are set.
             return response;
         },
     },
-    providers: [], // Providers (like Credentials) are defined in the main auth.ts, not needed for middleware logic usually.
+    providers: [], // Auth providers (eg Credentials) are set in auth.ts, not used in middleware
 } satisfies NextAuthConfig;

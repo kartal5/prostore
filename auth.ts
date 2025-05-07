@@ -6,7 +6,7 @@ import { compareSync } from 'bcrypt-ts-edge'; // Using your synchronous version
 import type { NextAuthConfig } from 'next-auth';
 import { cookies } from 'next/headers'; // Correct import for server-side cookie access
 
-// Main configuration for NextAuth.js (used for API routes, server components, etc.)
+// main configuration for NextAuth.js (used for API routes, server components, etc.)
 export const mainAuthConfig = {
     pages: {
        signIn: '/sign-in',
@@ -44,7 +44,7 @@ export const mainAuthConfig = {
         }),
     ],
     callbacks: {
-        // The 'authorized' callback is handled by auth.config.ts for middleware.
+        // 'authorized' callback is handled by auth.config.ts for middleware
 
         async session({ session, token }: any) {
             if (token) {
@@ -55,7 +55,7 @@ export const mainAuthConfig = {
             return session;
         },
 
-        // Removed unused 'account' and 'profile' parameters from the signature
+        
         async jwt({ token, user, trigger, session: updateSession }: any) {
             if (user) {
                 token.id = user.id;
@@ -87,16 +87,16 @@ export const mainAuthConfig = {
                                     await tx.cart.deleteMany({
                                         where: { userId: user.id },
                                     });
-                                    // Correctly update only the userId, removing sessionCartId assignment
+                                    // update only the userId
                                     await tx.cart.update({
                                         where: { id: sessionCart.id },
                                         data: {
                                             userId: user.id,
-                                            // sessionCartId: null, // REMOVED: Avoid assigning null if field is not nullable
+                                            // sessionCartId: null,
                                         },
                                     });
                                 });
-                                // Optionally delete the cookie after successful merge
+                                // optionally delete the cookie after successful merge
                                 // cookies().delete('sessionCartId');
                             }
                         }
