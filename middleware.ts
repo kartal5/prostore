@@ -1,53 +1,22 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { getToken } from 'next-auth/jwt';
+import NextAuth from 'next-auth';
+import { authConfig } from './auth.config'; // Import the specific configuration for middleware
 
-// Secret should match what you have in your .env file for NEXTAUTH_SECRET
-const secret = process.env.NEXTAUTH_SECRET;
+/**
+ * Export the 'auth' middleware function initialized with our authConfig.
+ * This lets NextAuth handle the core authentication/authorization checks
+ * based on the logic defined in auth.config.ts (specifically the 'authorized' callback).
+ */
+export default NextAuth(authConfig).auth;
 
-export async function middleware(request: NextRequest) {
-  // Pass the secret to getToken
-  const token = await getToken({ 
-    req: request,
-    secret: secret 
-  });
-  
-// Protected paths defined here run at the EDGE (before page rendering) to redirect unauthenticated users
-  const protectedPaths = [
-    /\/shipping-address/,
-    /\/payment-method/,
-    /\/place-order/,
-    /\/profile/,
-    /\/user\/(.*)/,
-    /\/order\/(.*)/,
-    /\/admin/,
-  ];
-  
-  // Get pathname from the req URL object
-  const { pathname } = request.nextUrl;
-  
-  // Check if user is not authenticated and accessing a protected path
-  const isProtectedPath = protectedPaths.some(pattern => pattern.test(pathname));
-  if (!token && isProtectedPath) {
-    // Redirect to sign-in page with callback URL
-    const signInUrl = new URL('/sign-in', request.url);
-    signInUrl.searchParams.set('callbackUrl', pathname);
-    return NextResponse.redirect(signInUrl);
-  }
-  
-  // If we get here, either the user is authenticated or the path doesn't need protection
-  // Handle session cart ID
-  if (!request.cookies.get('sessionCartId')) {
-    const response = NextResponse.next();
-    response.cookies.set('sessionCartId', crypto.randomUUID());
-    return response;
-  }
-  
-  // Continue with the request
-  return NextResponse.next();
-}
-
-// Keep your existing matcher
+/**
+ * Configuration for the Next.js Middleware.
+ * The `matcher` specifies which paths this middleware should run on.
+ */
 export const config = {
-  matcher: ['/(.*)'],
+    // This matcher prevents the middleware from running on:
+    // - API routes (/api/...)
+    // - Next.js internal paths (/_next/...)
+    // - Static files typically found in /public (e.g., .png, .ico)
+    // Adjust this pattern if you have other paths to exclude or include.
+    matcher: ['/((?!api|_next/static|_next/image|.*\\.png$|images/|assets/).*)'],
 };

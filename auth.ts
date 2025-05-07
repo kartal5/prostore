@@ -1,162 +1,118 @@
 import NextAuth from 'next-auth';
-import { PrismaAdapter } from '@auth/prisma-adapter'
-import { prisma } from '@/db/prisma'
-import CredentialsProvider from 'next-auth/providers/credentials'
-import { compareSync } from 'bcrypt-ts-edge';
+import { PrismaAdapter } from '@auth/prisma-adapter';
+import { prisma } from '@/db/prisma';
+import CredentialsProvider from 'next-auth/providers/credentials';
+import { compareSync } from 'bcrypt-ts-edge'; // Using your synchronous version
 import type { NextAuthConfig } from 'next-auth';
-import { cookies } from 'next/headers';
-import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers'; // Correct import for server-side cookie access
 
-// Protected paths defined here work with NextAuth inside your app code for a second layer of security
-const protectedPaths = [
-    /\/shipping-address/,
-    /\/payment-method/,
-    /\/place-order/,
-    /\/profile/,
-    /\/user\/(.*)/,
-    /\/order\/(.*)/,
-    /\/admin/,
-  ];
-
-export const config = {
+// Main configuration for NextAuth.js (used for API routes, server components, etc.)
+export const mainAuthConfig = {
     pages: {
-        signIn: '/sign-in',
-        error: '/sign-in'
-    },  
+       signIn: '/sign-in',
+       error: '/sign-in',
+    },
     session: {
         strategy: 'jwt',
         maxAge: 30 * 24 * 60 * 60, // 30 days
     },
     adapter: PrismaAdapter(prisma),
-    providers: [CredentialsProvider({
+    providers: [
+        CredentialsProvider({
             credentials: {
                 email: { type: 'email' },
-                password: { type: 'password' }
+                password: { type: 'password' },
             },
             async authorize(credentials) {
-                if (credentials == null) return null;
-
-                // Find user in database
+                if (!credentials?.email || !credentials.password) return null;
                 const user = await prisma.user.findFirst({
-                    where: {
-                        email: credentials.email as string
-                    }
+                    where: { email: credentials.email as string },
                 });
-
-                // Check if user exists and if the password matches
                 if (user && user.password) {
-                    const isMatch = compareSync(credentials.password as string, user.password)
-
-                    // If password is correct then return user
+                    const isMatch = compareSync(credentials.password as string, user.password);
                     if (isMatch) {
                         return {
                             id: user.id,
                             name: user.name,
                             email: user.email,
-                            role: user.role
-                        }
+                            role: user.role,
+                        };
                     }
                 }
-                // If user does not exist or password does not match return null
                 return null;
-            }
-        })
+            },
+        }),
     ],
     callbacks: {
-        async session({ session, user, trigger, token }: any) {
-            // Set the user ID from the token
-            session.user.id = token.sub;
-            session.user.role = token.role;
-            session.user.name = token.name;
+        // The 'authorized' callback is handled by auth.config.ts for middleware.
 
-            // If there's an update, set the user name
-            if (trigger === 'update') {
-                session.user.name = user.name;
+        async session({ session, token }: any) {
+            if (token) {
+                session.user.id = token.sub ?? token.id;
+                session.user.role = token.role;
+                session.user.name = token.name;
             }
-
             return session;
         },
-        async jwt({ token,user, trigger, session }: any) {
-            // Assign user fields to token
+
+        // Removed unused 'account' and 'profile' parameters from the signature
+        async jwt({ token, user, trigger, session: updateSession }: any) {
             if (user) {
+                token.id = user.id;
                 token.role = user.role;
+                token.name = user.name;
 
-                // If user has no name then use the email
-                if (user.name === 'NO_NAME') {
-                    token.name = user.email!.split('@')[0];
-
-                    // Update database to reflect the token name
-                    await prisma.user.update({
+                if (user.name === 'NO_NAME' && user.email) {
+                    token.name = user.email.split('@')[0];
+                    prisma.user.update({
                         where: { id: user.id },
-                        data: {name: token.name},
-                    });
+                        data: { name: token.name },
+                    }).catch(console.error);
                 }
 
+                // Merge guest cart to user cart on sign-in or sign-up
                 if (trigger === 'signIn' || trigger === 'signUp') {
-                    const cookiesObject = await cookies();
-                    const sessionCartId = cookiesObject.get('sessionCartId')?.value;
-                  
-                    if (sessionCartId) {
-                      const sessionCart = await prisma.cart.findFirst({
-                        where: { sessionCartId }
-                      });
+                    try {
+                        // Correctly await the cookies() function
+                        const cookiesObject = await cookies();
+                        const sessionCartId = cookiesObject.get('sessionCartId')?.value;
 
-                      if (sessionCart) {
-                        // Delete current user cart
-                        await prisma.cart.deleteMany({
-                            where: { userId: user.id },
-                        });
+                        if (sessionCartId) {
+                            const sessionCart = await prisma.cart.findFirst({
+                                where: { sessionCartId: sessionCartId },
+                            });
 
-                        // Assign new cart
-                        await prisma.cart.update({
-                            where: {id: sessionCart.id},
-                            data: {userId: user.id},
-                        });
-                      }
+                            if (sessionCart) {
+                                await prisma.$transaction(async (tx) => {
+                                    await tx.cart.deleteMany({
+                                        where: { userId: user.id },
+                                    });
+                                    // Correctly update only the userId, removing sessionCartId assignment
+                                    await tx.cart.update({
+                                        where: { id: sessionCart.id },
+                                        data: {
+                                            userId: user.id,
+                                            // sessionCartId: null, // REMOVED: Avoid assigning null if field is not nullable
+                                        },
+                                    });
+                                });
+                                // Optionally delete the cookie after successful merge
+                                // cookies().delete('sessionCartId');
+                            }
+                        }
+                    } catch (e) {
+                       console.error("Error merging cart during JWT callback:", e);
                     }
-                  }
+                }
             }
 
-            // Handle session updates
-            if (session?.user.name && trigger === 'update') {
-                token.name = session.user.name;
+            if (trigger === 'update' && updateSession?.user?.name) {
+                 token.name = updateSession.user.name;
             }
 
             return token;
         },
-        authorized({ request, auth }: any) {
-            // Extract pathname from request URL
-            const pathname = request.nextUrl?.pathname || request.url;
-
-
-            // Check if user is not authenticated and accessing a protected path
-            if (!auth && protectedPaths.some((p) => p.test(pathname))) return false;
-
-
-            // Check for session cart cookie
-            if (!request.cookies.get('sessionCartId')) {
-                // Generate new session cart id cookie
-                const sessionCartId = crypto.randomUUID();
-
-                // Clone the req headers
-                const newRequestHeaders = new Headers(request.headers);
-
-                // Create new response and add the new headers
-                const response = NextResponse.next({
-                    request: {
-                        headers: newRequestHeaders,
-                    },
-                });
-
-                // Set newly generated sessionCarId in the response cookies
-                response.cookies.set('sessionCartId', sessionCartId);
-                
-                return response;
-            }   else {
-                return true;
-            }
-        },
     },
 } satisfies NextAuthConfig;
 
-export const { handlers, auth, signIn, signOut } = NextAuth(config);
+export const { handlers, auth, signIn, signOut } = NextAuth(mainAuthConfig);
