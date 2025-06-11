@@ -14,7 +14,7 @@ import {
   import { redirect } from 'next/navigation';
   
   export const metadata: Metadata = {
-    title: 'Sign In',
+    title: 'Log ind',
   };
   
   const SignInPage = async (props: {

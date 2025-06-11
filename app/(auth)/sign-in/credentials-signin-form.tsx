@@ -24,7 +24,7 @@ const CredentialsSignInForm = () => {
 
         return (
             <Button disabled={pending} className='w-full' variant={'default'}>
-                { pending ? 'Signing In...' : 'Sign In' }
+                { pending ? 'Logger ind...' : 'Log ind' }
             </Button>
         )
     }
