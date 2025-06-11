@@ -24,7 +24,7 @@ const AddToCart = ({ cart, item }: { cart?: Cart; item: CartItem }) => {
             // Handle success add to cart
             toast(res.message, {
                 action: {
-                    label: "Go To Cart",
+                    label: "Gå til kurv",
                     onClick: () => router.push('/cart')
                 }
             });
@@ -75,7 +75,7 @@ const AddToCart = ({ cart, item }: { cart?: Cart; item: CartItem }) => {
             ) : (
                 <Plus className="w-4 h-4" />
             )}{" "}
-            Add To Cart
+            Læg i kurv
         </Button>
     );
 };

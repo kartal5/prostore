@@ -24,7 +24,7 @@ const SignUpForm = () => {
 
         return (
             <Button disabled={pending} className='w-full' variant={'default'}>
-                { pending ? 'Submitting...' : 'Sign Up' }
+                { pending ? 'Sender...' : 'Opret konto' }
             </Button>
         );
     };
@@ -35,7 +35,7 @@ const SignUpForm = () => {
             <input type="hidden" name="callbackUrl" value={callbackUrl} />
             <div className="space-y-6">
             <div>
-                    <Label htmlFor='email'>Name</Label>
+                    <Label htmlFor='email'>Navn</Label>
                     <Input 
                         id='name' 
                         name='name' 
@@ -55,7 +55,7 @@ const SignUpForm = () => {
                     />
                 </div>
                 <div>
-                    <Label htmlFor='password'>Password</Label>
+                    <Label htmlFor='password'>Adgangskode</Label>
                     <Input 
                         id='password' 
                         name='password' 
@@ -65,7 +65,7 @@ const SignUpForm = () => {
                     />
                 </div>
                 <div>
-                    <Label htmlFor='password'>Confirm Password</Label>
+                    <Label htmlFor='password'>Bekræft adgangskode</Label>
                     <Input 
                         id='confirmPassword' 
                         name='confirmPassword' 
@@ -86,9 +86,9 @@ const SignUpForm = () => {
                 )}
 
                 <div className="text-sm text-center text-muted-foreground">
-                    Already have a account?{' '}
+                    Har du allerede en konto?{' '}
                     <Link href='/sign-in' target='_self' className='link'>
-                        Sign In                    
+                        Log ind                    
                     </Link>
                 </div>
 

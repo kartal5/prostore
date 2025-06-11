@@ -54,12 +54,12 @@ const ReviewList = ({
         />
       ) : (
         <div>
-          Please
+          Venligst
           <Link
             className='text-blue-700 px-2'
             href={`/sign-in?callbackUrl=/product/${productSlug}`}
           >
-            log in
+            log ind
           </Link>
           for at skrive en anmeldelse
         </div>

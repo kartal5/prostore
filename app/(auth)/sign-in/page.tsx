@@ -43,9 +43,9 @@ import {
                 priority={true}
               />
             </Link>
-            <CardTitle className='text-center'>Sign In</CardTitle>
+            <CardTitle className='text-center'>Log ind</CardTitle>
             <CardDescription className='text-center'>
-              Sign in to your account
+              Log ind på din konto
             </CardDescription>
           </CardHeader>
           <CardContent className='space-y-4'>
